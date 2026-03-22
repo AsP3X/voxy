@@ -1,21 +1,24 @@
 package me.cortex.voxy.client.mixin.sodium;
 
+import com.mojang.blaze3d.vertex.PoseStack;
+import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import me.cortex.voxy.client.core.rendering.Viewport;
+import me.cortex.voxy.client.core.util.IrisUtil;
+import me.cortex.voxy.commonImpl.VoxyCommon;
+import me.jellysquid.mods.sodium.client.gl.device.CommandList;
+import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.RenderType;
+import org.spongepowered.asm.mixin.Dynamic;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
-import me.cortex.voxy.client.core.rendering.Viewport;
-import me.cortex.voxy.client.core.util.IrisUtil;
-import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
-import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.RenderType;
-
 @Mixin(value = SodiumWorldRenderer.class, remap = false)
-public class MixinSodiumWorldRendererVS {
+public class MixinSodiumWorldRendererVSLegacy {
     @Unique
     private ChunkRenderMatrices voxy$capturedMatrices;
 
