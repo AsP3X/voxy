@@ -22,13 +22,15 @@ public class MixinSodiumWorldRendererVSLegacy {
     @Unique
     private ChunkRenderMatrices voxy$capturedMatrices;
 
-    @Inject(method = "drawChunkLayer(Lnet/minecraft/client/renderer/RenderType;Lme/jellysquid/mods/sodium/client/render/chunk/ChunkRenderMatrices;DDD)V", at = @At("HEAD"))
-    private void voxy$captureMatrices(RenderType renderLayer, ChunkRenderMatrices matrices, double x, double y, double z, CallbackInfo ci) {
-        this.voxy$capturedMatrices = matrices;
+    @Dynamic
+    @Inject(method = "drawChunkLayer(Lnet/minecraft/client/renderer/RenderType;Lcom/mojang/blaze3d/vertex/PoseStack;DDD)V", at = @At("HEAD"))
+    private void voxy$captureMatrices(RenderType renderLayer, PoseStack matrixStack, double x, double y, double z, CallbackInfo ci) {
+        this.voxy$capturedMatrices = ChunkRenderMatrices.from(matrixStack);
     }
 
-    @Inject(method = "drawChunkLayer(Lnet/minecraft/client/renderer/RenderType;Lme/jellysquid/mods/sodium/client/render/chunk/ChunkRenderMatrices;DDD)V", at = @At("TAIL"))
-    private void injectRender(RenderType renderLayer, ChunkRenderMatrices matrices, double x, double y, double z, CallbackInfo ci) {
+    @Dynamic
+    @Inject(method = "drawChunkLayer(Lnet/minecraft/client/renderer/RenderType;Lcom/mojang/blaze3d/vertex/PoseStack;DDD)V", at = @At("TAIL"))
+    private void injectRender(RenderType renderLayer, PoseStack matrixStack, double x, double y, double z, CallbackInfo ci) {
         this.doRender(this.voxy$capturedMatrices, renderLayer, x, y, z);
     }
     
