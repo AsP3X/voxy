@@ -24,6 +24,7 @@ public class VoxyConfig implements OptionStorage<VoxyConfig> {
             .excludeFieldsWithModifiers(Modifier.PRIVATE)
             .create();
 
+    private static boolean LOADED_WHILE_UNAVAILABLE;
     public static VoxyConfig CONFIG = loadOrCreate();
 
     public boolean enabled = true;
@@ -68,11 +69,18 @@ public class VoxyConfig implements OptionStorage<VoxyConfig> {
             var config = new VoxyConfig();
             config.save();
             return config;
-        } else {
-            var config = new VoxyConfig();
-            config.enabled = false;
-            config.enableRendering = false;
-            return config;
+        }
+        LOADED_WHILE_UNAVAILABLE = true;
+        var config = new VoxyConfig();
+        config.enabled = false;
+        config.enableRendering = false;
+        return config;
+    }
+
+    public static void reloadAfterVoxyAvailable() {
+        if (LOADED_WHILE_UNAVAILABLE && VoxyCommon.isAvailable()) {
+            LOADED_WHILE_UNAVAILABLE = false;
+            CONFIG = loadOrCreate();
         }
     }
 
