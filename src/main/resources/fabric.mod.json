@@ -45,5 +45,8 @@
   "suggests": {
     "java": ">=21"
   },
+  "conflicts": {
+    "starlight": "*"
+  },
   "accessWidener": "voxy.accesswidener"
 }
