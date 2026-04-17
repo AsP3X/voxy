@@ -86,13 +86,7 @@ public class ChunkBoundRenderer {
             }
         }
 
-        if (!this.addQueue.isEmpty()) {
-            this.addQueue.forEach(this::_addPos);//TODO: REPLACE WITH SCATTER COMPUTE
-            this.addQueue.clear();
-            UploadStream.INSTANCE.commit();
-        }
-
-        if (this.chunk2idx.isEmpty()) return;
+        if (this.chunk2idx.isEmpty() && this.addQueue.isEmpty()) return;
 
         viewport.depthBoundingBuffer.clear(0);
 
@@ -158,6 +152,12 @@ public class ChunkBoundRenderer {
             glEnable(GL_DEPTH_TEST);
         }
 
+
+        if (!this.addQueue.isEmpty()) {
+            this.addQueue.forEach(this::_addPos);//TODO: REPLACE WITH SCATTER COMPUTE
+            this.addQueue.clear();
+            UploadStream.INSTANCE.commit();
+        }
     }
 
     private void _remPos(long pos) {
