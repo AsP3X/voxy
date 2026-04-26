@@ -81,13 +81,16 @@ dependencies {
     compileOnly "org.lz4:lz4-java:1.8.0"
     voxyEmbed "org.tukaani:xz:1.10"
     if (!isInGHA) { voxyEmbed "org.xerial:sqlite-jdbc:3.49.1.0" }
+    // lwjgl base jar: do not embed. Minecraft + NeoForge already ship org.lwjgl:lwjgl on the
+    // game module path. Bundling a second copy causes JPMS split-package errors such as
+    // "Modules voxy and org.lwjgl export package org.lwjgl.system.windows to module
+    // mixinextras.neoforge". Base LWJGL natives are also already extracted to java.library.path.
+    // We only embed the LMDB/ZSTD addon jars (and their natives) which are NOT shipped by Minecraft.
     def lwjglV = project.findProperty("lwjgl_embed_version") ?: "3.3.3"
-    voxyEmbed platform("org.lwjgl:lwjgl-bom:${lwjglV}")
-    voxyEmbed "org.lwjgl:lwjgl"
-    voxyEmbed "org.lwjgl:lwjgl-lmdb"
-    voxyEmbed "org.lwjgl:lwjgl-zstd"
-    voxyEmbed "org.lwjgl:lwjgl:${lwjglV}:natives-windows"
-    voxyEmbed "org.lwjgl:lwjgl:${lwjglV}:natives-linux"
+    compileOnly platform("org.lwjgl:lwjgl-bom:${lwjglV}")
+    compileOnly "org.lwjgl:lwjgl"
+    voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}"
+    voxyEmbed "org.lwjgl:lwjgl-zstd:${lwjglV}"
     voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}:natives-windows"
     voxyEmbed "org.lwjgl:lwjgl-zstd:${lwjglV}:natives-windows"
     voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}:natives-linux"
@@ -193,11 +196,23 @@ tasks.named("jar", Jar) {
                     || (f.name.contains("sqlite") && f.name.contains("jdbc"))
         }.collect { zipTree(it) }
     }
-    from {
-        configurations.voxyEmbed.getFiles().findAll {
-            it.name.contains("lwjgl") && !it.name.contains("sources") && !it.name.contains("javadoc")
+    // Embed only the LMDB/ZSTD addon JARs (Java bindings + their natives).
+    // The base lwjgl jar (and its natives) are intentionally excluded: Minecraft + NeoForge
+    // already ship org.lwjgl:lwjgl on the game module path and in java.library.path. Bundling
+    // a second copy causes JPMS split-package errors ("Modules voxy and org.lwjgl export
+    // package org.lwjgl.system.windows to module mixinextras.neoforge"). The filter below
+    // accepts only files whose name contains "lmdb" or "zstd", which skips the base lwjgl jar
+    // and its native jar even when they appear transitively in the voxyEmbed configuration.
+    // module-info.class is excluded as an extra safety net.
+    from({
+        configurations.voxyEmbed.getFiles().findAll { f ->
+            f.name.contains("lwjgl") && !f.name.contains("sources") && !f.name.contains("javadoc") &&
+                (f.name.contains("lmdb") || f.name.contains("zstd"))
         }.collect { zipTree(it) }
+    }) {
+        exclude "module-info.class"
     }
+
     manifest { attributes "Multi-Release": "true" }
     if (file("LICENSE").exists()) { from("LICENSE") { rename { f -> "${f}_${archives_base_name}" } } }
     if (!isInGHA) {
