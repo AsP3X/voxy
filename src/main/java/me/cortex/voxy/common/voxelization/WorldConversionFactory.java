@@ -1,7 +1,7 @@
 package me.cortex.voxy.common.voxelization;
 
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
-import me.cortex.voxy.client.core.util.ExpansionUtil;
+import me.cortex.voxy.common.util.ExpansionUtil;
 import me.cortex.voxy.commonImpl.mixin.minecraft.PalettedContainerDataAccessor;
 import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.common.world.other.Mipper;

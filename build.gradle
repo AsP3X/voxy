@@ -86,6 +86,8 @@ dependencies {
     voxyEmbed "org.lwjgl:lwjgl"
     voxyEmbed "org.lwjgl:lwjgl-lmdb"
     voxyEmbed "org.lwjgl:lwjgl-zstd"
+    voxyEmbed "org.lwjgl:lwjgl:${lwjglV}:natives-windows"
+    voxyEmbed "org.lwjgl:lwjgl:${lwjglV}:natives-linux"
     voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}:natives-windows"
     voxyEmbed "org.lwjgl:lwjgl-zstd:${lwjglV}:natives-windows"
     voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}:natives-linux"
@@ -193,7 +195,7 @@ tasks.named("jar", Jar) {
     }
     from {
         configurations.voxyEmbed.getFiles().findAll {
-            it.name.contains("lwjgl") && (it.name.contains("lmdb") || it.name.contains("zstd"))
+            it.name.contains("lwjgl") && !it.name.contains("sources") && !it.name.contains("javadoc")
         }.collect { zipTree(it) }
     }
     manifest { attributes "Multi-Release": "true" }

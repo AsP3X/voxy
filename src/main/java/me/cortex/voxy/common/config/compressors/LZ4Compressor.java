@@ -4,8 +4,8 @@ import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.ResizingThreadLocalMemoryBuffer;
+import me.cortex.voxy.common.util.UnsafeUtil;
 import net.jpountz.lz4.LZ4Factory;
-import org.lwjgl.system.MemoryUtil;
 
 public class LZ4Compressor implements StorageCompressor {
     private static final ResizingThreadLocalMemoryBuffer SCRATCH = new ResizingThreadLocalMemoryBuffer(SectionSerializationStorage.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
@@ -20,7 +20,7 @@ public class LZ4Compressor implements StorageCompressor {
     @Override
     public MemoryBuffer compress(MemoryBuffer saveData) {
         var res = SCRATCH.get(this.compressor.maxCompressedLength((int) saveData.size)+4).createUntrackedUnfreeableReference();
-        MemoryUtil.memPutInt(res.address, (int) saveData.size);
+        UnsafeUtil.memPutInt(res.address, (int) saveData.size);
         int size = this.compressor.compress(saveData.asByteBuffer(), 0, (int) saveData.size, res.asByteBuffer(), 4, (int) res.size-4);
         return res.subSize(size+4);
     }
@@ -28,7 +28,7 @@ public class LZ4Compressor implements StorageCompressor {
     @Override
     public MemoryBuffer decompress(MemoryBuffer saveData) {
         var res = SCRATCH.get().createUntrackedUnfreeableReference();
-        int size = this.decompressor.decompress(saveData.asByteBuffer(), 4, res.asByteBuffer(), 0, MemoryUtil.memGetInt(saveData.address));
+        int size = this.decompressor.decompress(saveData.asByteBuffer(), 4, res.asByteBuffer(), 0, UnsafeUtil.memGetInt(saveData.address));
         return res.subSize(size);
     }
 

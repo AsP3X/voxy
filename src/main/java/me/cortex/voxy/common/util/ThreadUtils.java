@@ -1,10 +1,7 @@
 package me.cortex.voxy.common.util;
 
-import org.lwjgl.system.Platform;
-
 public class ThreadUtils {
-
-	public static boolean isWindows = Platform.get() == Platform.WINDOWS;
-    public static boolean isLinux = Platform.get() == Platform.LINUX;
-    
+    private static final String OS = System.getProperty("os.name", "").toLowerCase();
+    public static boolean isWindows = OS.contains("win");
+    public static boolean isLinux = OS.contains("linux") || OS.contains("nix") || OS.contains("nux");
 }

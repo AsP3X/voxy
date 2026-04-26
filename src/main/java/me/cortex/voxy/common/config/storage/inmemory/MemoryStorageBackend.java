@@ -12,7 +12,6 @@ import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.world.WorldEngine;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import org.apache.commons.lang3.stream.Streams;
-import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -95,12 +94,10 @@ public class MemoryStorageBackend extends StorageBackend {
     @Override
     public void putIdMapping(int id, ByteBuffer data) {
         synchronized (this.idMappings) {
-            var cpy = MemoryUtil.memAlloc(data.remaining());
-            MemoryUtil.memCopy(data, cpy);
-            var prev = this.idMappings.put(id, cpy);
-            if (prev != null) {
-                MemoryUtil.memFree(prev);
-            }
+            var cpy = ByteBuffer.allocateDirect(data.remaining());
+            cpy.put(data.duplicate());
+            cpy.rewind();
+            this.idMappings.put(id, cpy);
         }
     }
 
@@ -126,7 +123,6 @@ public class MemoryStorageBackend extends StorageBackend {
     @Override
     public void close() {
         Arrays.stream(this.maps).map(Long2ObjectMap::values).flatMap(ObjectCollection::stream).forEach(MemoryBuffer::free);
-        this.idMappings.values().forEach(MemoryUtil::memFree);
     }
 
     public static class Config extends StorageConfig {

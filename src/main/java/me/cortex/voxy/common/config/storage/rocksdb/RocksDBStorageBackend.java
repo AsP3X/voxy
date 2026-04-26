@@ -1,14 +1,13 @@
 package me.cortex.voxy.common.config.storage.rocksdb;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import me.cortex.voxy.client.core.util.ExpansionUtil;
+import me.cortex.voxy.common.util.ExpansionUtil;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.storage.StorageBackend;
 import me.cortex.voxy.common.config.storage.StorageConfig;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.world.WorldEngine;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.system.MemoryUtil;
+import me.cortex.voxy.common.util.UnsafeUtil;
 import org.rocksdb.*;
 
 import java.io.File;
@@ -122,46 +121,43 @@ public class RocksDBStorageBackend extends StorageBackend {
 
     @Override
     public void iteratePositions(int level, LongConsumer consumer) {
-        try (var stack = MemoryStack.stackPush()) {
-            try (var iter = this.db.newIterator(this.worldSections, this.sectionReadOps)) {
-                ByteBuffer keyBuff = stack.calloc(8);
-                long keyBuffPtr = MemoryUtil.memAddress(keyBuff);
-                //TODO: this can be optimized if needed by useing a prefix-seek https://github.com/facebook/rocksdb/wiki/Prefix-Seek
+        try (var iter = this.db.newIterator(this.worldSections, this.sectionReadOps)) {
+            ByteBuffer keyBuff = ByteBuffer.allocateDirect(8);
+            //TODO: this can be optimized if needed by using a prefix-seek https://github.com/facebook/rocksdb/wiki/Prefix-Seek
 
-                if (level != -1) {//-1 means iterate all
-                    var seekBuff = stack.calloc(8);
-                    MemoryUtil.memPutLong(MemoryUtil.memAddress(seekBuff), Long.reverseBytes(Integer.toUnsignedLong(level) << 60));
-                    iter.seek(seekBuff);//we seak to the first level
-                } else {
-                    iter.seekToFirst();
+            if (level != -1) {//-1 means iterate all
+                ByteBuffer seekBuff = ByteBuffer.allocateDirect(8);
+                seekBuff.putLong(Long.reverseBytes(Integer.toUnsignedLong(level) << 60));
+                seekBuff.flip();
+                iter.seek(seekBuff);//we seek to the first level
+            } else {
+                iter.seekToFirst();
+            }
+            while (iter.isValid()) {
+                keyBuff.clear();
+                iter.key(keyBuff);
+                long key = Long.reverseBytes(keyBuff.getLong(0));
+                if (level != -1 && WorldEngine.getLevel(key) != level) {
+                    break;
                 }
-                while (iter.isValid()) {
-                    keyBuff.clear();
-                    iter.key(keyBuff);
-                    long key = Long.reverseBytes(MemoryUtil.memGetLong(keyBuffPtr));
-                    if (level != -1 && WorldEngine.getLevel(key) != level) {
-                        break;
-                    }
-                    consumer.accept(key);
-                    iter.next();
-                }
+                consumer.accept(key);
+                iter.next();
             }
         }
     }
 
     @Override
     public MemoryBuffer getSectionData(long key, MemoryBuffer scratch) {
-        try (var stack = MemoryStack.stackPush()){
-            var buffer = stack.malloc(8);
-            //HATE JAVA HATE JAVA HATE JAVA, Long.reverseBytes()
-            //THIS WILL ONLY WORK ON LITTLE ENDIAN SYSTEM AAAAAAAAA ;-;
-
-            MemoryUtil.memPutLong(MemoryUtil.memAddress(buffer), Long.reverseBytes(swizzlePos(key)));
+        try {
+            //THIS WILL ONLY WORK ON LITTLE ENDIAN SYSTEM
+            ByteBuffer buffer = ByteBuffer.allocateDirect(8);
+            buffer.putLong(Long.reverseBytes(swizzlePos(key)));
+            buffer.flip();
 
             var result = this.db.get(this.worldSections,
                     this.sectionReadOps,
                     buffer,
-                    MemoryUtil.memByteBuffer(scratch.address, (int) (scratch.size)));
+                    scratch.asByteBuffer());
 
             if (result == RocksDB.NOT_FOUND) {
                 return null;
@@ -175,9 +171,10 @@ public class RocksDBStorageBackend extends StorageBackend {
 
     @Override
     public void setSectionData(long key, MemoryBuffer data) {
-        try (var stack = MemoryStack.stackPush()) {
-            var keyBuff = stack.calloc(8);
-            MemoryUtil.memPutLong(MemoryUtil.memAddress(keyBuff), Long.reverseBytes(swizzlePos(key)));
+        try {
+            ByteBuffer keyBuff = ByteBuffer.allocateDirect(8);
+            keyBuff.putLong(Long.reverseBytes(swizzlePos(key)));
+            keyBuff.flip();
             this.db.put(this.worldSections, this.sectionWriteOps, keyBuff, data.asByteBuffer());
         } catch (RocksDBException e) {
             throw new RuntimeException(e);

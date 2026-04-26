@@ -1,7 +1,6 @@
 package me.cortex.voxy.common.util;
 
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -20,7 +19,7 @@ public class MemoryBuffer extends TrackedObject {
 
 
     public MemoryBuffer(long size) {
-        this(true, MemoryUtil.nmemAlloc(size), size, true);
+        this(true, UnsafeUtil.allocateMemory(size), size, true);
     }
 
     private MemoryBuffer(boolean track, long address, long size, boolean freeable) {
@@ -56,7 +55,7 @@ public class MemoryBuffer extends TrackedObject {
             COUNT.decrementAndGet();
         }
         if (this.freeable) {
-            MemoryUtil.nmemFree(this.address);
+            UnsafeUtil.freeMemory(this.address);
             TOTAL_SIZE.addAndGet(-this.size);
         } else {
             throw new IllegalArgumentException("Tried to free unfreeable buffer");
@@ -88,12 +87,12 @@ public class MemoryBuffer extends TrackedObject {
     }
 
     public MemoryBuffer zero() {
-        MemoryUtil.memSet(this.address, 0, this.size);
+        UnsafeUtil.memSet(this.address, this.size, (byte) 0);
         return this;
     }
 
     public ByteBuffer asByteBuffer() {
-        return MemoryUtil.memByteBuffer(this.address, (int) this.size);
+        return UnsafeUtil.memByteBuffer(this.address, (int) this.size);
     }
 
     //TODO: create like Long(offset) -> value at offset

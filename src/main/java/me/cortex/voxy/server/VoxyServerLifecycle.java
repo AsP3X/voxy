@@ -12,6 +12,7 @@ import java.util.List;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
@@ -28,6 +29,8 @@ public final class VoxyServerLifecycle {
         neoForgeBus.addListener(VoxyServerLifecycle::onPlayerLoggedOut);
         neoForgeBus.addListener(VoxyServerLifecycle::onServerTickPost);
         neoForgeBus.addListener(VoxyServerLifecycle::onChunkLoad);
+        neoForgeBus.addListener(RegisterCommandsEvent.class,
+                event -> event.getDispatcher().register(VoxyServerCommands.register()));
     }
 
     private static void onServerStarting(ServerStartingEvent event) {

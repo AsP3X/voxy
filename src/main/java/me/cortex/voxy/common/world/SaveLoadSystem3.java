@@ -1,12 +1,12 @@
 package me.cortex.voxy.common.world;
 
 import it.unimi.dsi.fastutil.longs.Long2ShortOpenHashMap;
-import me.cortex.voxy.client.core.util.ExpansionUtil;
+import me.cortex.voxy.common.util.ExpansionUtil;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.ThreadLocalMemoryBuffer;
 import me.cortex.voxy.common.world.other.Mapper;
-import org.lwjgl.system.MemoryUtil;
+import me.cortex.voxy.common.util.UnsafeUtil;
 
 public class SaveLoadSystem3 {
     public static final int STORAGE_VERSION = 0;
@@ -45,11 +45,11 @@ public class SaveLoadSystem3 {
         MemoryBuffer buffer = cache.memoryBuffer().createUntrackedUnfreeableReference();
         long ptr = buffer.address;
 
-        MemoryUtil.memPutLong(ptr, section.key); ptr += 8;
+        UnsafeUtil.memPutLong(ptr, section.key); ptr += 8;
         long metadataPtr = ptr; ptr += 8;
 
         long blockPtr = ptr; ptr += WorldSection.SECTION_VOLUME*2;
-        long prev = data[0]; MemoryUtil.memPutLong(ptr, prev); ptr+=8; LUT.put(prev, (short) 0);
+        long prev = data[0]; UnsafeUtil.memPutLong(ptr, prev); ptr+=8; LUT.put(prev, (short) 0);
         short mapping = 0;
         for (long block : data) {
             if (prev != block) {
@@ -57,10 +57,10 @@ public class SaveLoadSystem3 {
                 mapping = LUT.putIfAbsent(block, (short) LUT.size());
                 if (mapping == -1) {
                     mapping = (short) (LUT.size()-1);
-                    MemoryUtil.memPutLong(ptr, block); ptr+=8;
+                    UnsafeUtil.memPutLong(ptr, block); ptr+=8;
                 }
             }
-            MemoryUtil.memPutShort(blockPtr, mapping); blockPtr+=2;
+            UnsafeUtil.memPutShort(blockPtr, mapping); blockPtr+=2;
         }
         if (LUT.size() >= 1<<16) {
             throw new IllegalStateException();
@@ -72,7 +72,7 @@ public class SaveLoadSystem3 {
         metadata |= Byte.toUnsignedLong(section.getNonEmptyChildren())<<16;//Next byte
         //5 bytes free
 
-        MemoryUtil.memPutLong(metadataPtr, metadata);
+        UnsafeUtil.memPutLong(metadataPtr, metadata);
         //TODO: do hash
 
         return buffer.subSize(ptr-buffer.address);//Does not get freed
@@ -80,7 +80,7 @@ public class SaveLoadSystem3 {
 
     public static boolean deserialize(WorldSection section, MemoryBuffer data) {
         long ptr = data.address;
-        long key = MemoryUtil.memGetLong(ptr); ptr += 8;
+        long key = UnsafeUtil.memGetLong(ptr); ptr += 8;
 
         if (section.key != key) {
             //throw new IllegalStateException("Decompressed section not the same as requested. got: " + key + " expected: " + section.key);
@@ -88,13 +88,13 @@ public class SaveLoadSystem3 {
             return false;
         }
 
-        final long metadata = MemoryUtil.memGetLong(ptr); ptr += 8;
+        final long metadata = UnsafeUtil.memGetLong(ptr); ptr += 8;
         section.nonEmptyChildren = (byte) ((metadata>>>16)&0xFF);
         final long lutBasePtr = ptr + WorldSection.SECTION_VOLUME * 2;
 
         final var blockData = section.data;
         for (int i = 0; i < WorldSection.SECTION_VOLUME; i++) {
-            blockData[i] = MemoryUtil.memGetLong(lutBasePtr + Short.toUnsignedLong(MemoryUtil.memGetShort(ptr)) * 8L);ptr += 2;
+            blockData[i] = UnsafeUtil.memGetLong(lutBasePtr + Short.toUnsignedLong(UnsafeUtil.memGetShort(ptr)) * 8L);ptr += 2;
         }
 
         if (section.lvl == 0) {

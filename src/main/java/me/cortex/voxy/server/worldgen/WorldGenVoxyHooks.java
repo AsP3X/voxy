@@ -1,6 +1,5 @@
 package me.cortex.voxy.server.worldgen;
 
-import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.common.world.service.VoxelIngestService;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
@@ -29,13 +28,6 @@ public final class WorldGenVoxyHooks {
         if (VoxyCommon.getInstance() == null) {
             return false;
         }
-        if (VoxyCommon.IS_DEDICATED_SERVER) {
-            return true;
-        }
-        try {
-            return VoxyConfig.CONFIG.enabled && VoxyConfig.CONFIG.ingestEnabled;
-        } catch (Throwable ignored) {
-            return true;
-        }
+        return VoxyWorldGenConfig.DATA.enabled && VoxyWorldGenConfig.DATA.ingestEnabled;
     }
 }

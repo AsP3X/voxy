@@ -1,6 +1,6 @@
 package me.cortex.voxy.commonImpl.importers;
 
-import me.cortex.voxy.client.core.util.ExpansionUtil;
+import me.cortex.voxy.common.util.ExpansionUtil;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.thread.Service;
 import me.cortex.voxy.common.thread.ServiceManager;

@@ -10,10 +10,9 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.DebugUtils;
-import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
-import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import me.cortex.voxy.commonImpl.importers.DHImporter;
 import me.cortex.voxy.commonImpl.importers.WorldImporter;
 import net.minecraft.commands.CommandSourceStack;
@@ -105,145 +104,12 @@ public class VoxyCommands {
                                     return 0;
                                 })));
 
-        var pregen = Commands.literal("pregen")
-                // /voxy pregen dynamic enable|disable
-                .then(Commands.literal("dynamic")
-                        .then(Commands.literal("enable")
-                                .executes(ctx -> {
-                                    ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                                    if (!mgr.isRunning()) {
-                                        ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                        return 1;
-                                    }
-                                    mgr.startDynamic();
-                                    ctx.getSource().sendSuccess(() -> Component.literal(
-                                            "Voxy pre-generation started (dynamic — follows players)"), false);
-                                    return 0;
-                                }))
-                        .then(Commands.literal("disable")
-                                .executes(ctx -> {
-                                    ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                                    if (!mgr.isRunning()) {
-                                        ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                        return 1;
-                                    }
-                                    if (mgr.getPregenMode() != ChunkGenerationManager.PregenMode.DYNAMIC) {
-                                        ctx.getSource().sendFailure(Component.literal("Dynamic pre-generation is not running"));
-                                        return 1;
-                                    }
-                                    WorldgenProgressOverlay.resetPeak();
-                                    mgr.stop();
-                                    ctx.getSource().sendSuccess(() -> Component.literal(
-                                            "Voxy dynamic pre-generation stopped"), false);
-                                    return 0;
-                                })))
-                // /voxy pregen start <dimension> <centerX> <centerZ> <radius>
-                .then(Commands.literal("start")
-                        .then(Commands.argument("dimension", StringArgumentType.word())
-                                .suggests((ctx, sb) -> SharedSuggestionProvider.suggest(
-                                        new String[]{"overworld", "the_nether", "the_end"}, sb))
-                                .then(Commands.argument("centerX", IntegerArgumentType.integer())
-                                        .then(Commands.argument("centerZ", IntegerArgumentType.integer())
-                                                .then(Commands.argument("radius", IntegerArgumentType.integer(1))
-                                                        .executes(ctx -> startRegion(ctx)))))))
-                // /voxy pregen stop
-                .then(Commands.literal("stop")
-                        .executes(ctx -> {
-                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                            if (!mgr.isRunning()) {
-                                ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                return 1;
-                            }
-                            if (mgr.getPregenMode() == ChunkGenerationManager.PregenMode.NONE) {
-                                ctx.getSource().sendFailure(Component.literal("No pre-generation task is running"));
-                                return 1;
-                            }
-                            WorldgenProgressOverlay.resetPeak();
-                            mgr.stop();
-                            ctx.getSource().sendSuccess(() -> Component.literal("Voxy pre-generation stopped and task discarded"), false);
-                            return 0;
-                        }))
-                // /voxy pregen pause
-                .then(Commands.literal("pause")
-                        .executes(ctx -> {
-                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                            if (!mgr.isRunning()) {
-                                ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                return 1;
-                            }
-                            if (mgr.getPregenMode() == ChunkGenerationManager.PregenMode.NONE) {
-                                ctx.getSource().sendFailure(Component.literal("No pre-generation task is running"));
-                                return 1;
-                            }
-                            if (mgr.isUserPaused()) {
-                                ctx.getSource().sendFailure(Component.literal("Pre-generation is already paused"));
-                                return 1;
-                            }
-                            mgr.pause();
-                            ctx.getSource().sendSuccess(() -> Component.literal("Voxy pre-generation paused"), false);
-                            return 0;
-                        }))
-                // /voxy pregen resume
-                .then(Commands.literal("resume")
-                        .executes(ctx -> {
-                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                            if (!mgr.isRunning()) {
-                                ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                return 1;
-                            }
-                            if (mgr.getPregenMode() == ChunkGenerationManager.PregenMode.NONE) {
-                                ctx.getSource().sendFailure(Component.literal("No task set — use /voxy pregen dynamic or /voxy pregen start"));
-                                return 1;
-                            }
-                            if (!mgr.isUserPaused()) {
-                                ctx.getSource().sendFailure(Component.literal("Pre-generation is already running"));
-                                return 1;
-                            }
-                            mgr.resume();
-                            ctx.getSource().sendSuccess(() -> Component.literal("Voxy pre-generation resumed"), false);
-                            return 0;
-                        }));
-
         return Commands.literal("voxy")
                 .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
                 .then(debug)
-                .then(overlay)
-                .then(pregen);
-    }
-
-    private static int startRegion(CommandContext<CommandSourceStack> ctx) {
-        ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-        if (!mgr.isRunning()) {
-            ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-            return 1;
-        }
-
-        String dimStr = StringArgumentType.getString(ctx, "dimension");
-        int centerX  = IntegerArgumentType.getInteger(ctx, "centerX");
-        int centerZ  = IntegerArgumentType.getInteger(ctx, "centerZ");
-        int radius   = IntegerArgumentType.getInteger(ctx, "radius");
-
-        // Resolve dimension — accept short names or full resource locations
-        String dimLocation = dimStr.contains(":") ? dimStr : "minecraft:" + dimStr;
-        ResourceKey<Level> dimKey;
-        try {
-            dimKey = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,
-                    ResourceLocation.parse(dimLocation));
-        } catch (Exception e) {
-            ctx.getSource().sendFailure(Component.literal("Unknown dimension: " + dimStr));
-            return 1;
-        }
-
-        WorldgenProgressOverlay.resetPeak();
-        mgr.startRegion(dimKey, centerX, centerZ, radius);
-
-        final String dimName = dimStr;
-        ctx.getSource().sendSuccess(() -> Component.literal(String.format(
-                "Voxy pre-generation started: %s [%d,%d] radius %d blocks",
-                dimName, centerX, centerZ, radius)), false);
-        return 0;
+                .then(overlay);
     }
 
     private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {
