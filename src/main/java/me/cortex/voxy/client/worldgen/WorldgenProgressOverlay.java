@@ -24,10 +24,14 @@ public final class WorldgenProgressOverlay {
     private static final int ROW_STATS = 25;
     private static final int PANEL_H   = 37;
 
-    private static boolean visible = true;
+    private static boolean progressVisible = true;
+    private static boolean syncVisible = false;
 
-    public static boolean isVisible() { return visible; }
-    public static void setVisible(boolean v) { visible = v; }
+    public static boolean isProgressVisible() { return progressVisible; }
+    public static void setProgressVisible(boolean v) { progressVisible = v; }
+
+    public static boolean isSyncVisible() { return syncVisible; }
+    public static void setSyncVisible(boolean v) { syncVisible = v; }
 
     // State tracking across frames
     private static boolean wasRunning = false;
@@ -45,7 +49,6 @@ public final class WorldgenProgressOverlay {
     // -------------------------------------------------------------------------
 
     public static void render(GuiGraphics gfx, float partialTick) {
-        if (!visible) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.options.hideGui) return;
 
@@ -68,9 +71,13 @@ public final class WorldgenProgressOverlay {
         if (!taskActive && !networkActive) return; // nothing running — hide immediately
 
         if (taskActive) {
-            renderLocal(gfx, mc.font, mgr, mode, partialTick);
+            if (progressVisible) {
+                renderLocal(gfx, mc.font, mgr, mode, partialTick);
+            }
         } else {
-            renderNetwork(gfx, mc.font, partialTick);
+            if (syncVisible) {
+                renderNetwork(gfx, mc.font, partialTick);
+            }
         }
     }
 

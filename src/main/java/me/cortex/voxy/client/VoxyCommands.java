@@ -74,36 +74,69 @@ public class VoxyCommands {
                 );
 
         var overlay = Commands.literal("overlay")
-                .executes(ctx -> {
-                    boolean now = !WorldgenProgressOverlay.isVisible();
-                    WorldgenProgressOverlay.setVisible(now);
-                    ctx.getSource().sendSuccess(() -> Component.literal(
-                            "Voxy worldgen overlay " + (now ? "enabled" : "disabled")), false);
-                    return 0;
-                })
-                .then(Commands.argument("enabled", BoolArgumentType.bool())
-                        .executes(ctx -> {
-                            boolean now = BoolArgumentType.getBool(ctx, "enabled");
-                            WorldgenProgressOverlay.setVisible(now);
-                            ctx.getSource().sendSuccess(() -> Component.literal(
-                                    "Voxy worldgen overlay " + (now ? "enabled" : "disabled")), false);
-                            return 0;
-                        }));
+                .then(Commands.literal("progress")
+                        .then(Commands.literal("enabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setProgressVisible(true);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy worldgen progress overlay enabled"), false);
+                                    return 0;
+                                }))
+                        .then(Commands.literal("disabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setProgressVisible(false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy worldgen progress overlay disabled"), false);
+                                    return 0;
+                                })))
+                .then(Commands.literal("sync")
+                        .then(Commands.literal("enabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setSyncVisible(true);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy LOD sync overlay enabled"), false);
+                                    return 0;
+                                }))
+                        .then(Commands.literal("disabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setSyncVisible(false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy LOD sync overlay disabled"), false);
+                                    return 0;
+                                })));
 
         var pregen = Commands.literal("pregen")
-                // /voxy pregen dynamic
+                // /voxy pregen dynamic enable|disable
                 .then(Commands.literal("dynamic")
-                        .executes(ctx -> {
-                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-                            if (!mgr.isRunning()) {
-                                ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
-                                return 1;
-                            }
-                            mgr.startDynamic();
-                            ctx.getSource().sendSuccess(() -> Component.literal(
-                                    "Voxy pre-generation started (dynamic — follows players)"), false);
-                            return 0;
-                        }))
+                        .then(Commands.literal("enable")
+                                .executes(ctx -> {
+                                    ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+                                    if (!mgr.isRunning()) {
+                                        ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
+                                        return 1;
+                                    }
+                                    mgr.startDynamic();
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy pre-generation started (dynamic — follows players)"), false);
+                                    return 0;
+                                }))
+                        .then(Commands.literal("disable")
+                                .executes(ctx -> {
+                                    ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+                                    if (!mgr.isRunning()) {
+                                        ctx.getSource().sendFailure(Component.literal("Voxy worldgen is not active on this server"));
+                                        return 1;
+                                    }
+                                    if (mgr.getPregenMode() != ChunkGenerationManager.PregenMode.DYNAMIC) {
+                                        ctx.getSource().sendFailure(Component.literal("Dynamic pre-generation is not running"));
+                                        return 1;
+                                    }
+                                    WorldgenProgressOverlay.resetPeak();
+                                    mgr.stop();
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy dynamic pre-generation stopped"), false);
+                                    return 0;
+                                })))
                 // /voxy pregen start <dimension> <centerX> <centerZ> <radius>
                 .then(Commands.literal("start")
                         .then(Commands.argument("dimension", StringArgumentType.word())

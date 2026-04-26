@@ -70,6 +70,10 @@ public final class ChunkGenerationManager {
     // mode
     private volatile PregenMode pregenMode = PregenMode.NONE;
 
+    // Isolated graph for region pregen — boundary phantom-completions stay here
+    // and never pollute the shared DimensionState.distanceGraph used by dynamic pregen.
+    private volatile DistanceGraph regionGraph = null;
+
     // region-mode parameters (chunk coords)
     private volatile ResourceKey<Level> regionDimension;
     private volatile int regionMinCx, regionMinCz, regionMaxCx, regionMaxCz;
@@ -162,6 +166,7 @@ public final class ChunkGenerationManager {
     /** Start following players and generating their surroundings. */
     public void startDynamic() {
         stats.reset();
+        regionGraph = null;
         pregenMode = PregenMode.DYNAMIC;
         userPaused.set(false);
         scheduleConfigReload();
@@ -182,18 +187,26 @@ public final class ChunkGenerationManager {
         regionMinCz = (centerBlockZ - blockRadius) >> 4;
         regionMaxCz = (centerBlockZ + blockRadius) >> 4;
 
-        // Ensure dimension state is initialized so the count is available
+        // Build an isolated DistanceGraph for this region task.
+        // Seeding it with already-completed chunks means we skip work that's done,
+        // and any boundary phantom-completions stay here, never touching the shared
+        // DimensionState.distanceGraph used by dynamic pregen.
+        DistanceGraph rg = new DistanceGraph();
         if (server != null) {
             ServerLevel level = server.getLevel(dimension);
             if (level != null) {
                 DimensionState ds = getOrSetupState(level);
-                if (!ds.loaded) {
-                    ensureDimensionLoaded(ds, level, dimension);
+                ensureDimensionLoaded(ds, level, dimension);
+                synchronized (ds.completedChunks) {
+                    for (long pos : ds.completedChunks) {
+                        rg.markChunkCompleted(ChunkPos.getX(pos), ChunkPos.getZ(pos));
+                    }
                 }
-                ds.remainingInRadius.set(
-                        ds.distanceGraph.countMissingInBounds(regionMinCx, regionMinCz, regionMaxCx, regionMaxCz));
+                ds.remainingInRadius.set(rg.countMissingInBounds(
+                        regionMinCx, regionMinCz, regionMaxCx, regionMaxCz));
             }
         }
+        regionGraph = rg;
 
         pregenMode = PregenMode.REGION;
         userPaused.set(false);
@@ -212,6 +225,7 @@ public final class ChunkGenerationManager {
             ds.batchCounters.clear();
             ds.remainingInRadius.set(0);
         }
+        regionGraph = null;
         stats.reset();
         Logger.info("Voxy pregen stopped and task discarded (was {})", prev);
     }
@@ -395,6 +409,9 @@ public final class ChunkGenerationManager {
     private void workerLoopRegion() throws InterruptedException {
         if (server == null) { Thread.sleep(500); return; }
 
+        DistanceGraph rg = regionGraph;
+        if (rg == null) { Thread.sleep(500); return; }
+
         ServerLevel level = server.getLevel(regionDimension);
         if (level == null) {
             Thread.sleep(1000);
@@ -406,7 +423,8 @@ public final class ChunkGenerationManager {
             ensureDimensionLoaded(ds, level, regionDimension);
         }
 
-        List<ChunkPos> batch = ds.distanceGraph.findWorkInBounds(
+        // Use the isolated regionGraph — boundary phantom-completions stay here
+        List<ChunkPos> batch = rg.findWorkInBounds(
                 regionMinCx, regionMinCz, regionMaxCx, regionMaxCz, ds.trackedBatches);
 
         if (batch == null) {
@@ -649,11 +667,12 @@ public final class ChunkGenerationManager {
             }
             maxCounts.forEach((state, count) -> state.remainingInRadius.set(count));
         } else if (pregenMode == PregenMode.REGION && server != null) {
+            DistanceGraph rg = regionGraph;
             ServerLevel level = server.getLevel(regionDimension);
-            if (level != null) {
+            if (level != null && rg != null) {
                 DimensionState ds = getOrSetupState(level);
                 ds.remainingInRadius.set(
-                        ds.distanceGraph.countMissingInBounds(regionMinCx, regionMinCz, regionMaxCx, regionMaxCz));
+                        rg.countMissingInBounds(regionMinCx, regionMinCz, regionMaxCx, regionMaxCz));
             }
         }
     }
@@ -704,10 +723,15 @@ public final class ChunkGenerationManager {
         if (state.completedChunks.add(key)) {
             stats.incrementCompleted();
             state.distanceGraph.markChunkCompleted(pos.x, pos.z);
+            // Also mark in the isolated region graph so it converges correctly
+            DistanceGraph rg = regionGraph;
+            if (rg != null) rg.markChunkCompleted(pos.x, pos.z);
             state.remainingInRadius.updateAndGet(v -> Math.max(0, v - 1));
         } else {
             stats.incrementSkipped();
             state.distanceGraph.markChunkCompleted(pos.x, pos.z);
+            DistanceGraph rg = regionGraph;
+            if (rg != null) rg.markChunkCompleted(pos.x, pos.z);
         }
         decrementBatch(state, pos);
     }

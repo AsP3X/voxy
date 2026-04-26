@@ -477,7 +477,8 @@ public class DistanceGraph {
                         }
                     }
                     if (!batch.isEmpty()) return batch;
-                    trackedBatches.remove(key); // batch entirely outside bounds
+                    // batch entirely outside bounds — trackedBatches already has key, remove it
+                    trackedBatches.remove(key);
                 }
                 continue;
             }
