@@ -3,6 +3,7 @@ package me.cortex.voxy.commonImpl;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.Serialization;
 import me.cortex.voxy.VoxyMod;
+import me.cortex.voxy.server.VoxyDedicatedServerInstance;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.api.distmarker.Dist;
@@ -32,6 +33,9 @@ public class VoxyCommon {
         MOD_VERSION = verStr + "-" + (commit != null && commit.length() >= 7 ? commit.substring(0, 7) : (commit != null ? commit : "?"));
         IS_DEDICATED_SERVER = FMLEnvironment.dist == Dist.DEDICATED_SERVER;
         Serialization.init();
+        if (FMLEnvironment.dist == Dist.DEDICATED_SERVER) {
+            setInstanceFactory(() -> new VoxyDedicatedServerInstance());
+        }
     }
 
     private static @Nullable String readBuildCommit() {

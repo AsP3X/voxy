@@ -4,6 +4,8 @@ import me.cortex.voxy.client.VoxyClient;
 import me.cortex.voxy.client.VoxyCommands;
 import me.cortex.voxy.client.VoxyKeyBindings;
 import me.cortex.voxy.commonImpl.VoxyCommon;
+import me.cortex.voxy.server.VoxyServerLifecycle;
+import me.cortex.voxy.server.worldgen.VoxyWorldGenBootstrap;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLEnvironment;
@@ -23,6 +25,8 @@ public final class VoxyMod {
 
     public VoxyMod(IEventBus modEventBus, ModContainer container) {
         VoxyCommon.initNeoForge(container);
+        VoxyWorldGenBootstrap.init(modEventBus);
+        VoxyServerLifecycle.register(NeoForge.EVENT_BUS);
         if (FMLEnvironment.dist == Dist.CLIENT) {
             modEventBus.addListener((FMLClientSetupEvent e) -> e.enqueueWork(() ->
                     VoxyClient.onNeoForgeClientInit()

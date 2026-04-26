@@ -16,6 +16,8 @@ authors="Cortex"
 config="client.voxy.mixins.json"
 [[mixins]]
 config="common.voxy.mixins.json"
+[[mixins]]
+config="server.voxy.mixins.json"
 
 [[dependencies.${mod_id}]]
 modId="neoforge"

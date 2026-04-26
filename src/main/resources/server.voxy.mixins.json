@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "me.cortex.voxy.server.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ServerChunkCacheInvoker",
+    "WorldgenBlockUpdateMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

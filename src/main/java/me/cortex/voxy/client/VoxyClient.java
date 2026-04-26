@@ -4,9 +4,14 @@ import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.rendering.util.SharedIndexBuffer;
 import me.cortex.voxy.client.core.util.ExpansionUtil;
 import me.cortex.voxy.client.config.VoxyConfig;
+import me.cortex.voxy.client.worldgen.NetworkState;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import net.minecraft.client.Minecraft;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.common.NeoForge;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -91,6 +96,12 @@ public final class VoxyClient {
     public static void onNeoForgeClientInit() {
         setInstanceFactory();
         // Frex: Fabric entrypoints (frex_flawless_frames) — not available on NeoForge; keep stub set empty.
+        ChunkGenerationManager.getInstance().setPauseCheck(() -> {
+            Minecraft mc = Minecraft.getInstance();
+            return mc != null && mc.isPaused();
+        });
+        NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, e -> NetworkState.tick());
+        NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, e -> NetworkState.setServerConnected(false));
     }
 
     public static boolean isFrexActive() {
