@@ -8,8 +8,9 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface PalettedContainerDataAccessor {
 
     /**
-     * {@code net.minecraft.world.level.chunk.PalettedContainer.Data} (not a public type name).
+     * Descriptor must match {@code PalettedContainer$Data}, not {@link Object}, for Mixin to locate the field.
+     * {@link PalettedContainer.Data} is widened to public via {@code META-INF/accesstransformer.cfg} (record + ctor).
      */
     @Accessor("data")
-    Object voxy$getData();
+    PalettedContainer.Data<?> voxy$getData();
 }

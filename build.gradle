@@ -75,7 +75,10 @@ dependencies {
     voxyEmbed "redis.clients:jedis:5.1.0"
     voxyEmbed "org.rocksdb:rocksdbjni:10.2.1"
     voxyEmbed "org.apache.commons:commons-pool2:2.12.0"
-    voxyEmbed "org.lz4:lz4-java:1.8.0"
+    // lz4-java: do not bundle (neither fat-jar nor Jar-in-Jar). Minecraft + NeoForge already ship
+    // org.lz4:lz4-java on the game module path; embedding a second copy causes JPMS errors such as
+    // "reads more than one module named org.lz4.java" (e.g. with Sodium's service layer).
+    compileOnly "org.lz4:lz4-java:1.8.0"
     voxyEmbed "org.tukaani:xz:1.10"
     if (!isInGHA) { voxyEmbed "org.xerial:sqlite-jdbc:3.49.1.0" }
     def lwjglV = project.findProperty("lwjgl_embed_version") ?: "3.3.3"
@@ -183,7 +186,7 @@ tasks.named("jar", Jar) {
     from { zipTree(rocksdbFilteredJar.get().archiveFile.get().asFile) }
     from {
         configurations.voxyEmbed.getFiles().findAll { f ->
-            f.name.contains("redis") || f.name.contains("commons-pool2") || f.name.contains("lz4-java")
+            f.name.contains("redis") || f.name.contains("commons-pool2")
                     || f.name.contains("tukaani") || (f.name.contains("sqlite") && f.name.contains("jdbc"))
         }.collect { zipTree(it) }
     }

@@ -27,11 +27,10 @@ public final class VoxyMod {
             modEventBus.addListener((FMLClientSetupEvent e) -> e.enqueueWork(() ->
                     VoxyClient.onNeoForgeClientInit()
             ));
-            // Register voxy/* client commands; execution paths still check VoxyCommon
-            modEventBus.addListener((RegisterClientCommandsEvent evt) ->
-                    evt.getDispatcher().register(VoxyCommands.register())
-            );
             modEventBus.addListener(RegisterKeyMappingsEvent.class, VoxyKeyBindings::registerKeys);
+            // RegisterClientCommandsEvent is a NeoForge game-bus event, not IModBusEvent
+            NeoForge.EVENT_BUS.addListener((RegisterClientCommandsEvent evt) ->
+                    evt.getDispatcher().register(VoxyCommands.register()));
             NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, VoxyKeyBindings::onClientTick);
         }
     }

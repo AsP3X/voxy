@@ -5,8 +5,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.Palette;
 
 /**
- * {@link net.minecraft.world.level.chunk.PalettedContainer.Data} is not a public type; read palette and storage
- * from the Mixin {@link me.cortex.voxy.commonImpl.mixin.minecraft.PalettedContainerDataAccessor} return value.
+ * {@link net.minecraft.world.level.chunk.PalettedContainer.Data} — palette/storage via reflection on the instance
+ * returned from {@link me.cortex.voxy.commonImpl.mixin.minecraft.PalettedContainerDataAccessor#voxy$getData()}.
  */
 public final class PalettedContainerDataBridge {
     private static final java.lang.reflect.Method PALETTE;

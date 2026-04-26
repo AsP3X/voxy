@@ -180,6 +180,10 @@ public class Serialization {
         try {
             InputStream stream = Serialization.class.getClassLoader()
                     .getResourceAsStream(pack.replaceAll("[.]", "/"));
+            if (stream == null) {
+                // Union/JiJ mod jars often have no directory listing resource for packages
+                return List.of();
+            }
             BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
             return reader.lines().flatMap(inner -> {
                 if (inner.endsWith(".class")) {
