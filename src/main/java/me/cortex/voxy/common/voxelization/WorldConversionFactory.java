@@ -2,10 +2,9 @@ package me.cortex.voxy.common.voxelization;
 
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import me.cortex.voxy.client.core.util.ExpansionUtil;
+import me.cortex.voxy.commonImpl.mixin.minecraft.PalettedContainerDataAccessor;
 import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.common.world.other.Mipper;
-import me.jellysquid.mods.lithium.common.world.chunk.LithiumHashPalette;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.util.LinearCongruentialGenerator;
@@ -24,8 +23,6 @@ import net.minecraft.world.level.chunk.SingleValuePalette;
 import java.util.WeakHashMap;
 
 public class WorldConversionFactory {
-    private static final boolean LITHIUM_INSTALLED = FabricLoader.getInstance().isModLoaded("lithium");
-
     private static final class Cache {
         private final int[] biomeCache = new int[4*4*4];
         private final WeakHashMap<Mapper, Reference2IntOpenHashMap<BlockState>> localMapping = new WeakHashMap<>();
@@ -45,25 +42,6 @@ public class WorldConversionFactory {
     //TODO: create a mapping for world/mapper -> local mapping
     private static final ThreadLocal<Cache> THREAD_LOCAL = ThreadLocal.withInitial(Cache::new);
 
-    private static boolean setupLithiumLocalPallet(Palette<BlockState> vp, Reference2IntOpenHashMap<BlockState> blockCache, Mapper mapper, int[] pc)  {
-        if (vp instanceof LithiumHashPalette<BlockState>) {
-            for (int i = 0; i < vp.getSize(); i++) {
-                BlockState state = null;
-                int blockId = -1;
-                try { state = vp.valueFor(i); } catch (Exception e) {}
-                if (state != null) {
-                    blockId = blockCache.getOrDefault(state, -1);
-                    if (blockId == -1) {
-                        blockId = mapper.getIdForBlockState(state);
-                        blockCache.put(state, blockId);
-                    }
-                }
-                pc[i] = blockId;
-            }
-            return true;
-        }
-        return false;
-    }
     private static int setupLocalPalette(Palette<BlockState> vp, Reference2IntOpenHashMap<BlockState> blockCache, Mapper mapper, int[] pc) {
         int c = vp.getSize();
         if (vp instanceof LinearPalette<BlockState>) {
@@ -109,9 +87,7 @@ public class WorldConversionFactory {
             }
             pc[0] = blockId;
         } else {
-            if (!(LITHIUM_INSTALLED && setupLithiumLocalPallet(vp, blockCache, mapper, pc))) {
-                throw new IllegalStateException("Unknown palette type: " + vp);
-            }
+            throw new IllegalStateException("Unknown palette type: " + vp);
         }
         return c;
     }
@@ -139,12 +115,13 @@ public class WorldConversionFactory {
         var data = section.section;
         var zoomCells = cache.zoomCellCache;
 
-        var vp = blockContainer.data.palette;
+        var containerData = ((PalettedContainerDataAccessor) (Object) blockContainer).voxy$getData();
+        var vp = PalettedContainerDataBridge.palette(containerData);
         var pc = cache.getPaletteCache(vp.getSize());
         GlobalPalette<BlockState> bps = null;
 
         int pcc = 0;
-        if (blockContainer.data.palette instanceof GlobalPalette<BlockState> _bps) {
+        if (vp instanceof GlobalPalette<BlockState> _bps) {
             bps = _bps;
             pcc = bps.getSize();
         } else {
@@ -173,7 +150,7 @@ public class WorldConversionFactory {
 
 
         int nonZeroCnt = 0;
-        if (blockContainer.data.storage instanceof SimpleBitStorage bStor) {
+        if (PalettedContainerDataBridge.storage(containerData) instanceof SimpleBitStorage bStor) {
             var bDat = bStor.getRaw();
             int iterPerLong = (64 / bStor.getBits()) - 1;
 
@@ -201,7 +178,7 @@ public class WorldConversionFactory {
                 data[i] = Mapper.composeMappingId(light, bId, biomes[ExpansionUtil.compress(i,0b1100_1100_1100)]);
             }
         } else {
-            if (!(blockContainer.data.storage instanceof ZeroBitStorage)) {
+            if (!(PalettedContainerDataBridge.storage(containerData) instanceof ZeroBitStorage)) {
                 throw new IllegalStateException();
             }
             int bId = pc[0];

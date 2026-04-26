@@ -1,6 +1,6 @@
 package me.cortex.voxy.client.mixin;
 
-import net.fabricmc.loader.api.FabricLoader;
+import net.neoforged.fml.loading.FMLLoader;
 
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.tree.ClassNode;
@@ -17,17 +17,35 @@ import java.util.Set;
 
 public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
     private static boolean sodiumLegacy = true;
-    private boolean valkyrienSkiesInstalled = false;
-    private boolean nvidiumInstalled = false;
-    private boolean connectorInstalled = false;
+    private boolean valkyrienSkiesInstalled;
+    private boolean nvidiumInstalled;
+    private boolean sodiumInstalled;
+    private boolean irisInstalled;
+
+    private static boolean modOnLoadingList(String id) {
+        try {
+            var ll = FMLLoader.getLoadingModList();
+            if (ll == null) {
+                return false;
+            }
+            for (var m : ll.getMods()) {
+                if (id.equals(m.getModId())) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
 
     @Override
     public void onLoad(String mixinPackage) {
-        valkyrienSkiesInstalled = FabricLoader.getInstance().isModLoaded("valkyrienskies");
-        nvidiumInstalled = FabricLoader.getInstance().isModLoaded("nvidium");
-        connectorInstalled = FabricLoader.getInstance().isModLoaded("connector");
+        valkyrienSkiesInstalled = modOnLoadingList("valkyrienskies");
+        nvidiumInstalled = modOnLoadingList("nvidium");
+        sodiumInstalled = modOnLoadingList("sodium");
+        irisInstalled = modOnLoadingList("iris");
         try (InputStream stream = getClass().getClassLoader()
-                .getResourceAsStream("me/jellysquid/mods/sodium/client/render/SodiumWorldRenderer.class")) {
+                .getResourceAsStream("net/caffeinemc/mods/sodium/client/render/SodiumWorldRenderer.class")) {
 
             if (stream != null) {
                 ClassReader reader = new ClassReader(stream);
@@ -49,10 +67,22 @@ public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
     }
 
     @Override
-    public boolean shouldApplyMixin(String targetClassName, String mixinClassName) { return true; }
+    public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".sodium.") && !sodiumInstalled) {
+            return false;
+        }
+        if (mixinClassName.contains(".iris.") && !irisInstalled) {
+            return false;
+        }
+        return true;
+    }
 
-    @Override public List<String> getMixins() {
+    @Override
+    public List<String> getMixins() {
         List<String> mixins = new ArrayList<>();
+        if (!sodiumInstalled) {
+            return mixins;
+        }
         if (valkyrienSkiesInstalled && !nvidiumInstalled) {
             mixins.add(sodiumLegacy ? "sodium.MixinSodiumWorldRendererVSLegacy" : "sodium.MixinSodiumWorldRendererVS");
         } else {

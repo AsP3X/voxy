@@ -79,7 +79,7 @@ import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
@@ -524,11 +524,10 @@ public class WorldImporter implements IDataImporter {
         }
 
         var blockStatesRes = blockStateCodec.parse(NbtOps.INSTANCE, section.getCompound("block_states"));
-        blockStatesRes.get().ifRight(partial -> {
-            //TODO: if its only partial, it means should try to upgrade the nbt format with datafixerupper probably
-            return;
+        blockStatesRes.resultOrPartial(partial -> {
+            // TODO: if partial only, try upgrading the NBT with DataFixerUpper
         });
-        var blockStates = blockStatesRes.getOrThrow(false, Logger::error);
+        var blockStates = blockStatesRes.getOrThrow(msg -> { Logger.error(msg); return new IllegalStateException(msg); });
         var biomes = this.defaultBiomeProvider;
         var optBiomes = section.getCompound("biomes");
         if (!optBiomes.isEmpty()) {

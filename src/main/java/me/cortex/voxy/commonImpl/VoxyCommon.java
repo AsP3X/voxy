@@ -2,52 +2,65 @@ package me.cortex.voxy.commonImpl;
 
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.Serialization;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.ModInitializer;
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.ModContainer;
+import me.cortex.voxy.VoxyMod;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.api.distmarker.Dist;
+import org.jetbrains.annotations.Nullable;
 
-public class VoxyCommon implements ModInitializer {
-    public static final String MOD_VERSION;
-    public static final boolean IS_DEDICATED_SERVER;
-    public static final boolean IS_IN_MINECRAFT;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
 
-    static {
-        ModContainer mod = (ModContainer) FabricLoader.getInstance().getModContainer("voxy").orElse(null);
+public class VoxyCommon {
+    public static String MOD_VERSION = "<UNKNOWN>";
+    public static boolean IS_DEDICATED_SERVER;
+    public static boolean IS_IN_MINECRAFT;
+
+    public static void initNeoForge(@Nullable ModContainer mod) {
+        VoxyMod.INITIALISED = true;
         if (mod == null) {
             IS_IN_MINECRAFT = false;
-            Logger.error("Running voxy without minecraft");
-            MOD_VERSION = "<UNKNOWN>";
-            IS_DEDICATED_SERVER = false;
-        } else {
-            IS_IN_MINECRAFT = true;
-            var version = mod.getMetadata().getVersion().getFriendlyString();
-            var commit = mod.getMetadata().getCustomValue("commit").getAsString();
-            MOD_VERSION = version + "-" + commit.substring(0,7);
-            IS_DEDICATED_SERVER = FabricLoader.getInstance().getEnvironmentType() == EnvType.SERVER;
-            Serialization.init();
+            Logger.error("Running voxy without mod container");
+            IS_DEDICATED_SERVER = FMLEnvironment.dist == Dist.DEDICATED_SERVER;
+            return;
+        }
+        IS_IN_MINECRAFT = true;
+        var ver = mod.getModInfo().getVersion();
+        var verStr = ver != null ? ver.toString() : "0.0.0";
+        var commit = readBuildCommit();
+        MOD_VERSION = verStr + "-" + (commit != null && commit.length() >= 7 ? commit.substring(0, 7) : (commit != null ? commit : "?"));
+        IS_DEDICATED_SERVER = FMLEnvironment.dist == Dist.DEDICATED_SERVER;
+        Serialization.init();
+    }
+
+    private static @Nullable String readBuildCommit() {
+        try (InputStream in = VoxyCommon.class.getResourceAsStream("/voxy.build.properties")) {
+            if (in == null) return "dev";
+            var p = new Properties();
+            p.load(in);
+            return p.getProperty("commit", "dev");
+        } catch (IOException e) {
+            return "dev";
         }
     }
 
-    //This is hardcoded like this because people do not understand what they are doing
     public static boolean isVerificationFlagOn(String name) {
         return isVerificationFlagOn(name, false);
     }
 
     public static boolean isVerificationFlagOn(String name, boolean defaultOn) {
-        return System.getProperty("voxy."+name, defaultOn?"true":"false").equals("true");
+        return "true".equalsIgnoreCase(System.getProperty("voxy." + name, defaultOn ? "true" : "false"));
     }
 
     public static void breakpoint() {
-        int breakpoint = 0;
+        int ignored = 0;
     }
 
-    @Override
-    public void onInitialize() {
+    @SuppressWarnings("EmptyMethod")
+    public void onInitialize() { }
 
-    }
-
-    public interface IInstanceFactory {VoxyInstance create();}
+    public interface IInstanceFactory { VoxyInstance create(); }
     private static VoxyInstance INSTANCE;
     private static IInstanceFactory FACTORY = null;
 
@@ -64,27 +77,25 @@ public class VoxyCommon implements ModInitializer {
 
     public static void shutdownInstance() {
         if (INSTANCE != null) {
-            var instance = INSTANCE;
-            INSTANCE = null;//Make it null before shutdown
-            instance.shutdown();
+            var inst = INSTANCE;
+            INSTANCE = null;
+            inst.shutdown();
         }
     }
 
     public static void createInstance() {
         if (FACTORY == null) {
-            //Logger.info("Voxy factory");
             return;
         }
         if (INSTANCE != null) {
             throw new IllegalStateException("Cannot create multiple instances");
         }
-        var instance = FACTORY.create();
-        if (instance != null) {
-            INSTANCE = instance;
+        VoxyInstance n = FACTORY.create();
+        if (n != null) {
+            INSTANCE = n;
         }
     }
 
-    //Is voxy available in any capacity
     public static boolean isAvailable() {
         return FACTORY != null;
     }

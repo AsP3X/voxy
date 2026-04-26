@@ -34,7 +34,7 @@ public class ShaderLoader {
                 } else if (line.startsWith("#import")) {
                     var match = IMPORT_PATTERN.matcher(line);
                     if (!match.matches()) throw new IllegalArgumentException("Unknown import: " + line);
-                    var iid = new ResourceLocation(match.group("namespace"), match.group("path"));
+                    var iid = ResourceLocation.fromNamespaceAndPath(match.group("namespace"), match.group("path"));
                     out.addAll(parseRoot(iid));
                 } else {
                     out.add(line);

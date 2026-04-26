@@ -73,23 +73,16 @@ public class VoxyUniforms {
 
 
 
-    private record Inverted(Supplier<Matrix4f> parent) implements Supplier<Matrix4f> {
-        private Inverted(Supplier<Matrix4f> parent) {
-            this.parent = parent;
-        }
-
+    private record Inverted(Supplier<Matrix4fc> parent) implements Supplier<Matrix4fc> {
+        @Override
         public Matrix4f get() {
             Matrix4f copy = new Matrix4f(this.parent.get());
             copy.invert();
             return copy;
         }
-
-        public Supplier<Matrix4f> parent() {
-            return this.parent;
-        }
     }
 
-    private static class PreviousMat implements Supplier<Matrix4f> {
+    private static class PreviousMat implements Supplier<Matrix4fc> {
         private final Supplier<Matrix4fc> parent;
         private Matrix4f previous;
 
@@ -98,10 +91,11 @@ public class VoxyUniforms {
             this.previous = new Matrix4f();
         }
 
+        @Override
         public Matrix4f get() {
-            Matrix4f previous = this.previous;
+            Matrix4f prev = this.previous;
             this.previous = new Matrix4f(this.parent.get());
-            return previous;
+            return prev;
         }
     }
 }

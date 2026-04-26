@@ -6,9 +6,6 @@ import me.cortex.voxy.client.core.util.ExpansionUtil;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 
 import java.io.FileOutputStream;
@@ -19,7 +16,7 @@ import java.util.HashSet;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-public class VoxyClient implements ClientModInitializer {
+public final class VoxyClient {
     private static final HashSet<String> FREX = new HashSet<>();
     private static FileLock EXCLUSIVE_LOCK;
     private static boolean INSTANCE_FACTORY_SET;
@@ -49,7 +46,7 @@ public class VoxyClient implements ClientModInitializer {
         RENDER_BACKEND_INITIALIZED = true;
         setInstanceFactory();
 
-        Capabilities.init();//Ensure clinit is called
+        Capabilities.init();
 
         if (Capabilities.INSTANCE.hasBrokenDepthSampler) {
             Logger.error("AMD broken depth sampler detected, voxy does not work correctly and has been disabled, this will hopefully be fixed in the future");
@@ -57,35 +54,30 @@ public class VoxyClient implements ClientModInitializer {
 
         boolean systemSupported = Capabilities.INSTANCE.compute && Capabilities.INSTANCE.indirectParameters && !Capabilities.INSTANCE.hasBrokenDepthSampler;
         if (!systemSupported) {
-             Logger.error("Voxy is unsupported on your system.");
+            Logger.error("Voxy is unsupported on your system.");
         }
 
-        if (systemSupported && System.getProperty("voxy.exclusiveLock", "false").equalsIgnoreCase("true")) {
-            //Try acquire the lock file
+        if (systemSupported && "true".equalsIgnoreCase(System.getProperty("voxy.exclusiveLock", "false"))) {
             var vf = Minecraft.getInstance().gameDirectory.toPath().resolve(".voxy");
             if (!vf.toFile().isDirectory()) {
-                vf.toFile().mkdir();
+                //noinspection ResultOfMethodCallIgnored
+                vf.toFile().mkdirs();
             }
             try {
                 FileOutputStream fis = new FileOutputStream(vf.resolve("voxy.lock").toFile());
                 EXCLUSIVE_LOCK = fis.getChannel().lock(0, Long.MAX_VALUE, false);
             } catch (NonWritableChannelException | IOException e) {
-                //If some error write to log and unsupport
                 Logger.error("Failed to acquire exclusive voxy lock file, mod will be disabled");
                 systemSupported = false;
             }
-
         }
 
         if (systemSupported) {
-
             SharedIndexBuffer.INSTANCE.id();
             RENDER_BACKEND_READY = true;
-
             if (!Capabilities.INSTANCE.subgroup) {
                 Logger.warn("GPU does not support subgroup operations, expect some performance degradation");
             }
-
         }
 
         if (!ExpansionUtil.isJava21()) {
@@ -93,23 +85,12 @@ public class VoxyClient implements ClientModInitializer {
         }
     }
 
-    @Override
-    public void onInitializeClient() {
+    /**
+     * NeoForge: called from FMLClientSetupEvent (replaces Fabric ClientModInitializer + command callback).
+     */
+    public static void onNeoForgeClientInit() {
         setInstanceFactory();
-
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-            if (VoxyCommon.isAvailable()) {
-                dispatcher.register(VoxyCommands.register());
-            }
-        });
-
-        FabricLoader.getInstance()
-                .getEntrypoints("frex_flawless_frames", Consumer.class)
-                .forEach(api -> ((Consumer<Function<String,Consumer<Boolean>>>)api).accept(name->active->{if (active) {
-                    FREX.add(name);
-                } else {
-                    FREX.remove(name);
-                }}));
+        // Frex: Fabric entrypoints (frex_flawless_frames) — not available on NeoForge; keep stub set empty.
     }
 
     public static boolean isFrexActive() {
@@ -121,6 +102,6 @@ public class VoxyClient implements ClientModInitializer {
     }
 
     public static boolean disableSodiumChunkRender() {
-        return false;// getOcclusionDebugState() != 0;
+        return false;
     }
 }
