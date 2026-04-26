@@ -258,6 +258,21 @@ public class VoxyRenderSystem {
 
         //this.autoBalanceSubDivSize();
 
+        //Apply LOD ring load/unload before drawing so this frame matches the current camera. When this ran
+        //after runPipeline, add/remove top-level nodes lagged by one frame and could sit in a void between
+        //Sodium dropping a section mesh and Voxy showing far geometry (or the reverse when approaching).
+        {
+            UploadStream.INSTANCE.tick();
+            while (this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) && VoxyClient.isFrexActive()) {
+                // Frex: drain the ring queue in one pass so the world state is consistent before render.
+            }
+            TimingStatistics.H.start();
+            do {
+                this.modelService.tick(900_000);
+            } while (VoxyClient.isFrexActive() && !this.modelService.areQueuesEmpty());
+            TimingStatistics.H.stop();
+        }
+
         this.pipeline.preSetup(viewport);
 
         TimingStatistics.E.start();
@@ -280,17 +295,6 @@ public class VoxyRenderSystem {
 
         PrintfDebugUtil.tick();
 
-        //As much dynamic runtime stuff here
-        {
-            //Tick upload stream (this is ok to do here as upload ticking is just memory management)
-            UploadStream.INSTANCE.tick();
-
-            while (this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) && VoxyClient.isFrexActive());//While FF is active, run until everything is processed
-            TimingStatistics.H.start();
-            //Done here as is allows less gl state resetup
-            do { this.modelService.tick(900_000); } while (VoxyClient.isFrexActive() && !this.modelService.areQueuesEmpty());
-            TimingStatistics.H.stop();
-        }
         GPUTiming.INSTANCE.marker();
         TimingStatistics.postDynamic.stop();
 

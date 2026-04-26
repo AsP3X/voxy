@@ -95,13 +95,11 @@ public class ChunkBoundRenderer {
             }
         }
 
-        if (!this.addQueue.isEmpty()) {
-            this.addQueue.forEach(this::_addPos);//TODO: REPLACE WITH SCATTER COMPUTE
-            this.addQueue.clear();
-            UploadStream.INSTANCE.commit();
-        }
-
-        if (this.chunk2idx.isEmpty()) return;
+        // Adds are deferred until AFTER the draw. When a Sodium section is newly built and addSection()
+        // is called, we let the LOD still render on this frame (so Voxy and Sodium both show for one
+        // overlapping frame), then on the next frame the new depth-bound clips the LOD away. Without
+        // this deferral a one-frame void appears between the LOD disappearing and Sodium appearing.
+        if (this.chunk2idx.isEmpty() && this.addQueue.isEmpty()) return;
 
         viewport.depthBoundingBuffer.clear(0);
 
@@ -167,6 +165,12 @@ public class ChunkBoundRenderer {
             glEnable(GL_DEPTH_TEST);
         }
 
+        // Process adds AFTER drawing so new sections only block LOD from the next frame onwards.
+        if (!this.addQueue.isEmpty()) {
+            this.addQueue.forEach(this::_addPos);//TODO: REPLACE WITH SCATTER COMPUTE
+            this.addQueue.clear();
+            UploadStream.INSTANCE.commit();
+        }
     }
 
     private void _remPos(long pos) {
