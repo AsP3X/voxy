@@ -187,7 +187,8 @@ tasks.named("jar", Jar) {
     from {
         configurations.voxyEmbed.getFiles().findAll { f ->
             f.name.contains("redis") || f.name.contains("commons-pool2")
-                    || f.name.contains("tukaani") || (f.name.contains("sqlite") && f.name.contains("jdbc"))
+                    || f.name.contains("tukaani") || f.name.startsWith("xz-")
+                    || (f.name.contains("sqlite") && f.name.contains("jdbc"))
         }.collect { zipTree(it) }
     }
     from {

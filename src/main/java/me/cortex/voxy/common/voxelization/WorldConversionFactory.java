@@ -87,7 +87,20 @@ public class WorldConversionFactory {
             }
             pc[0] = blockId;
         } else {
-            throw new IllegalStateException("Unknown palette type: " + vp);
+            // Fallback for unknown palette types (e.g., Lithium's LithiumHashPalette)
+            for (int i = 0; i < vp.getSize(); i++) {
+                BlockState state = null;
+                int blockId = -1;
+                try { state = vp.valueFor(i); } catch (Exception e) {}
+                if (state != null) {
+                    blockId = blockCache.getOrDefault(state, -1);
+                    if (blockId == -1) {
+                        blockId = mapper.getIdForBlockState(state);
+                        blockCache.put(state, blockId);
+                    }
+                }
+                pc[i] = blockId;
+            }
         }
         return c;
     }
