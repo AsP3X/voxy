@@ -18,6 +18,10 @@ public final class VoxyWorldGenBootstrap {
                 VoxyWorldGenNetworking.LodColumnPayload.TYPE,
                 VoxyWorldGenNetworking.LodColumnPayload.STREAM_CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> VoxyWorldGenClientReceiver.onLodColumn(payload)));
+        reg.playToClient(
+                VoxyWorldGenNetworking.SyncTotalPayload.TYPE,
+                VoxyWorldGenNetworking.SyncTotalPayload.STREAM_CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> VoxyWorldGenClientReceiver.onSyncTotal(payload)));
     }
 
     public static void init(IEventBus modEventBus) {

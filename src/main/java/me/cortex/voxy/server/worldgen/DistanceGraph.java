@@ -154,6 +154,99 @@ public class DistanceGraph {
         return lx + (lz << 3);
     }
 
+    /**
+     * Count the number of <em>completed</em> chunks within the circular radius.
+     */
+    public int countCompletedInRange(ChunkPos center, int radiusChunks) {
+        int cbx = center.x >> BATCH_SIZE_SHIFT;
+        int cbz = center.z >> BATCH_SIZE_SHIFT;
+        int rb  = (radiusChunks + 3) >> BATCH_SIZE_SHIFT;
+
+        int rootSize = 1 << ROOT_SIZE_SHIFT;
+        int rbxMin = (cbx - rb) >> ROOT_SIZE_SHIFT;
+        int rbxMax = (cbx + rb) >> ROOT_SIZE_SHIFT;
+        int rbzMin = (cbz - rb) >> ROOT_SIZE_SHIFT;
+        int rbzMax = (cbz + rb) >> ROOT_SIZE_SHIFT;
+
+        int count = 0;
+        for (int rx = rbxMin; rx <= rbxMax; rx++) {
+            for (int rz = rbzMin; rz <= rbzMax; rz++) {
+                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                count += recursiveCountCompleted(root, 3, rx, rz, cbx, cbz, rb);
+            }
+        }
+        return count;
+    }
+
+    private int recursiveCountCompleted(Node node, int level, int nx, int nz, int cbx, int cbz, int rb) {
+        int size = 1 << (3 * level);
+        if (getDistSq(nx, nz, size, cbx, cbz) > (double) rb * rb) return 0;
+
+        if (level == 0) {
+            // batch-level: all 16 chunks in this batch cell are completed (we only reach level-0 via full mask)
+            return 16;
+        }
+
+        if (node != null && node.isFull()) {
+            // count all chunks in this subtree that are within range
+            return recursiveCountAll(level, nx, nz, cbx, cbz, rb);
+        }
+
+        if (node == null) return 0; // nothing completed here
+
+        // l1: check individual batch masks
+        if (level == 1) {
+            int c = 0;
+            for (int i = 0; i < 64; i++) {
+                int bx = (nx << 3) + (i & 7);
+                int bz = (nz << 3) + (i >> 3);
+                if (getDistSq(bx, bz, 1, cbx, cbz) > (double) rb * rb) continue;
+                if ((node.fullMask & (1L << i)) != 0) {
+                    c += 16;
+                } else {
+                    Object child = node.children.getOrDefault(i, 0);
+                    if (child instanceof Integer mask) {
+                        c += Integer.bitCount(mask);
+                    }
+                }
+            }
+            return c;
+        }
+
+        // higher levels: recurse
+        int c = 0;
+        for (int i = 0; i < 64; i++) {
+            int cx = (nx << 3) + (i & 7);
+            int cz = (nz << 3) + (i >> 3);
+            if ((node.fullMask & (1L << i)) != 0) {
+                int childSize = 1 << (3 * (level - 1));
+                if (getDistSq(cx, cz, childSize, cbx, cbz) <= (double) rb * rb) {
+                    c += recursiveCountAll(level - 1, cx, cz, cbx, cbz, rb);
+                }
+            } else {
+                Object child = node.children.get(i);
+                if (child instanceof Node childNode) {
+                    c += recursiveCountCompleted(childNode, level - 1, cx, cz, cbx, cbz, rb);
+                }
+            }
+        }
+        return c;
+    }
+
+    /** Count all 16-chunk batches within range for a fully-complete subtree. */
+    private int recursiveCountAll(int level, int nx, int nz, int cbx, int cbz, int rb) {
+        int size = 1 << (3 * level);
+        if (getDistSq(nx, nz, size, cbx, cbz) > (double) rb * rb) return 0;
+        if (level == 0) return 16;
+        int c = 0;
+        for (int i = 0; i < 64; i++) {
+            int cx = (nx << 3) + (i & 7);
+            int cz = (nz << 3) + (i >> 3);
+            c += recursiveCountAll(level - 1, cx, cz, cbx, cbz, rb);
+        }
+        return c;
+    }
+
     public int countMissingInRange(ChunkPos center, int radiusChunks) {
         int cbx = center.x >> BATCH_SIZE_SHIFT;
         int cbz = center.z >> BATCH_SIZE_SHIFT;
@@ -376,6 +469,10 @@ public class DistanceGraph {
                             int cz = (item.z << BATCH_SIZE_SHIFT) + lz;
                             if (cx >= minCx && cx <= maxCx && cz >= minCz && cz <= maxCz) {
                                 batch.add(new ChunkPos(cx, cz));
+                            } else {
+                                // Out-of-bounds slot: mark complete so the graph node
+                                // eventually becomes full and stops returning this batch.
+                                markChunkCompleted(cx, cz);
                             }
                         }
                     }

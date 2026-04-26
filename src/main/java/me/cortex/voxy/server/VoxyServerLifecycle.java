@@ -7,6 +7,8 @@ import me.cortex.voxy.server.worldgen.VoxyWorldGenConfig;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.ChunkPos;
+import java.util.List;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.NeoForge;
@@ -52,6 +54,10 @@ public final class VoxyServerLifecycle {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         PlayerTracker.getInstance().addPlayer(player);
         VoxyWorldGenNetworking.sendHandshake(player);
+        // Send total after a small delay so the dimension state is loaded
+        player.getServer().tell(new net.minecraft.server.TickTask(
+                player.getServer().getTickCount() + 20,
+                () -> VoxyWorldGenNetworking.sendSyncTotal(player)));
     }
 
     private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
@@ -66,10 +72,27 @@ public final class VoxyServerLifecycle {
     private static void onChunkLoad(ChunkEvent.Load event) {
         if (!(event.getLevel() instanceof ServerLevel level) || event.getLevel().isClientSide()) return;
         if (!(event.getChunk() instanceof LevelChunk chunk)) return;
+
+        List<ServerPlayer> targets = null;
         for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
-            if (player.level() == level) {
-                VoxyWorldGenNetworking.sendLODData(player, chunk);
-            }
+            if (player.level() != level) continue;
+            // Skip players that already received this chunk via the sync worker
+            var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
+            if (synced != null && synced.contains(chunk.getPos().toLong())) continue;
+            if (targets == null) targets = new java.util.ArrayList<>();
+            targets.add(player);
+        }
+        if (targets == null) return;
+
+        // Build sections once, fan out to all eligible players
+        var sections = VoxyWorldGenNetworking.buildSections(chunk);
+        if (sections.isEmpty()) return;
+
+        ChunkPos pos   = chunk.getPos();
+        int minY       = chunk.getMinSection();
+        var dim        = level.dimension();
+        for (ServerPlayer player : targets) {
+            VoxyWorldGenNetworking.sendLODDataPrebuilt(player, dim, pos, minY, sections);
         }
     }
 }

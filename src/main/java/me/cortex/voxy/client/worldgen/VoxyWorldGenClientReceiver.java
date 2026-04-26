@@ -9,20 +9,44 @@ import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public final class VoxyWorldGenClientReceiver {
+
+    /**
+     * Dedicated pool for LOD section deserialization and ingest.
+     * Keeps all PalettedContainer I/O off the client main thread.
+     * Thread count: half the available processors, min 2.
+     */
+    private static final ExecutorService INGEST_POOL = Executors.newFixedThreadPool(
+            Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+            r -> {
+                Thread t = new Thread(r, "Voxy-LOD-Ingest");
+                t.setDaemon(true);
+                return t;
+            });
+
     private VoxyWorldGenClientReceiver() {}
 
     public static void onHandshake(VoxyWorldGenNetworking.HandshakePayload payload) {
         NetworkState.setServerConnected(payload.serverHasMod());
+    }
+
+    public static void onSyncTotal(VoxyWorldGenNetworking.SyncTotalPayload payload) {
+        NetworkState.setTotalToSync(payload.total());
     }
 
     @SuppressWarnings("unchecked")
@@ -31,6 +55,7 @@ public final class VoxyWorldGenClientReceiver {
         if (level == null) return;
         if (!level.dimension().equals(payload.dimension())) return;
 
+        // Accumulate byte stats immediately on main thread
         long bytes = 0;
         for (var sd : payload.sections()) {
             bytes += sd.states().length + sd.biomes().length;
@@ -39,22 +64,40 @@ public final class VoxyWorldGenClientReceiver {
         }
         NetworkState.incrementReceived(bytes);
 
+        // Capture immutable context on main thread — safe to use from any thread
+        RegistryAccess registry = level.registryAccess();
+        WorldIdentifier worldId = WorldIdentifier.of(level);
+
+        // Dispatch decode + ingest to background pool — keeps main thread free
+        INGEST_POOL.execute(() -> processColumn(payload, registry, worldId));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void processColumn(VoxyWorldGenNetworking.LodColumnPayload payload,
+                                      RegistryAccess registry,
+                                      WorldIdentifier worldId) {
         for (var sectionData : payload.sections()) {
             ByteBuf statesRaw = Unpooled.wrappedBuffer(sectionData.states());
             ByteBuf biomesRaw = Unpooled.wrappedBuffer(sectionData.biomes());
             try {
-                LevelChunkSection section = new LevelChunkSection(level.registryAccess().registryOrThrow(Registries.BIOME));
+                LevelChunkSection section = new LevelChunkSection(
+                        registry.registryOrThrow(Registries.BIOME));
 
-                RegistryFriendlyByteBuf statesBuf = new RegistryFriendlyByteBuf(new FriendlyByteBuf(statesRaw), level.registryAccess());
+                RegistryFriendlyByteBuf statesBuf = new RegistryFriendlyByteBuf(
+                        new FriendlyByteBuf(statesRaw), registry);
                 ((PalettedContainer<BlockState>) section.getStates()).read(statesBuf);
 
-                RegistryFriendlyByteBuf biomesBuf = new RegistryFriendlyByteBuf(new FriendlyByteBuf(biomesRaw), level.registryAccess());
+                RegistryFriendlyByteBuf biomesBuf = new RegistryFriendlyByteBuf(
+                        new FriendlyByteBuf(biomesRaw), registry);
                 ((PalettedContainer<Holder<Biome>>) section.getBiomes()).read(biomesBuf);
 
-                DataLayer bl = sectionData.blockLight() != null ? new DataLayer(sectionData.blockLight()) : null;
-                DataLayer sl = sectionData.skyLight() != null ? new DataLayer(sectionData.skyLight()) : null;
+                DataLayer bl = sectionData.blockLight() != null
+                        ? new DataLayer(sectionData.blockLight()) : null;
+                DataLayer sl = sectionData.skyLight() != null
+                        ? new DataLayer(sectionData.skyLight()) : null;
 
-                VoxelIngestService.rawIngest(WorldIdentifier.of(level), section, payload.pos().x, sectionData.y(), payload.pos().z, bl, sl);
+                VoxelIngestService.rawIngest(worldId, section,
+                        payload.pos().x, sectionData.y(), payload.pos().z, bl, sl);
             } catch (Exception e) {
                 Logger.error("Failed to apply server LOD column for chunk " + payload.pos(), e);
             } finally {

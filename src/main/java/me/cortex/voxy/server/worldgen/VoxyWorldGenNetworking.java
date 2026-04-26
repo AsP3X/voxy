@@ -11,6 +11,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -24,7 +25,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class VoxyWorldGenNetworking {
-    private static final int MAX_PACKET_BYTES = 32_768;
+    // 256 KB per LodColumn payload — reduces packet count by ~8× vs 32 KB
+    private static final int MAX_PACKET_BYTES = 262_144;
 
     public record HandshakePayload(boolean serverHasMod) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<HandshakePayload> TYPE =
@@ -101,38 +103,63 @@ public final class VoxyWorldGenNetworking {
         }
     }
 
+    /**
+     * Sent from server → client immediately after the handshake to tell the
+     * client how many completed LOD chunks are available for its current radius.
+     * The client uses this as the denominator for the sync progress bar.
+     */
+    public record SyncTotalPayload(long total) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SyncTotalPayload> TYPE =
+                new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "sync_total"));
+        public static final StreamCodec<FriendlyByteBuf, SyncTotalPayload> STREAM_CODEC =
+                StreamCodec.of((b, v) -> b.writeLong(v.total()), b -> new SyncTotalPayload(b.readLong()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     private VoxyWorldGenNetworking() {}
 
     public static void broadcastLODData(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSection();
+        // Build sections once, reuse for every eligible player
         List<LodSectionPayload> sections = buildSections(chunk);
-        if (sections.isEmpty()) return;
 
         double maxDistSq = 4096.0 * 4096.0;
+        ResourceKey<Level> dim = chunk.getLevel().dimension();
 
         for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
             double dx = player.getX() - pos.getMiddleBlockX();
             double dz = player.getZ() - pos.getMiddleBlockZ();
-
-            if (player.level() != chunk.getLevel() || (dx * dx + dz * dz > maxDistSq)) {
+            if (player.level() != chunk.getLevel() || dx * dx + dz * dz > maxDistSq) {
                 setSyncedState(player, pos, false);
                 continue;
             }
-
-            sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
+            if (sections.isEmpty()) { setSyncedState(player, pos, false); continue; }
+            sendSectionsInBatches(player, dim, pos, minY, sections);
+            setSyncedState(player, pos, true);
         }
     }
 
+    /**
+     * Send a chunk's LOD data to one player using pre-built sections.
+     * Falls back to building sections if {@code prebuilt} is null.
+     */
     public static void sendLODData(ServerPlayer player, LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSection();
         List<LodSectionPayload> sections = buildSections(chunk);
-        if (sections.isEmpty()) {
-            setSyncedState(player, pos, false);
-            return;
-        }
+        if (sections.isEmpty()) { setSyncedState(player, pos, false); return; }
         sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
+        setSyncedState(player, pos, true);
+    }
+
+    /** Send pre-built sections to one player, marking the chunk as synced. */
+    public static void sendLODDataPrebuilt(ServerPlayer player, ResourceKey<Level> dim,
+                                           ChunkPos pos, int minY,
+                                           List<LodSectionPayload> sections) {
+        sendSectionsInBatches(player, dim, pos, minY, sections);
         setSyncedState(player, pos, true);
     }
 
@@ -147,7 +174,8 @@ public final class VoxyWorldGenNetworking {
         }
     }
 
-    private static List<LodSectionPayload> buildSections(LevelChunk chunk) {
+    /** Build the section payload list for a chunk — callable from server thread. */
+    public static List<LodSectionPayload> buildSections(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSection();
         List<LodSectionPayload> sections = new ArrayList<>();
@@ -190,7 +218,8 @@ public final class VoxyWorldGenNetworking {
         return sections;
     }
 
-    private static void sendSectionsInBatches(ServerPlayer player, ResourceKey<Level> dimension, ChunkPos pos, int minY, List<LodSectionPayload> sections) {
+    /** Send pre-built section payloads to one player. */
+    public static void sendSectionsInBatches(ServerPlayer player, ResourceKey<Level> dimension, ChunkPos pos, int minY, List<LodSectionPayload> sections) {
         List<LodSectionPayload> batch = new ArrayList<>();
         int batchBytes = 0;
 
@@ -216,5 +245,19 @@ public final class VoxyWorldGenNetworking {
 
     public static void sendHandshake(ServerPlayer player) {
         PacketDistributor.sendToPlayer(player, new HandshakePayload(true));
+    }
+
+    /**
+     * Compute and send the total completed-chunk count for this player's render
+     * radius so the client can display an accurate sync progress bar.
+     * Must be called on the server thread.
+     */
+    public static void sendSyncTotal(ServerPlayer player) {
+        ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+        if (!mgr.isRunning()) return;
+        ServerLevel level = (ServerLevel) player.level();
+        long total = mgr.computeSyncTotal(level, player.chunkPosition());
+        // Always send — even 0 so the client knows no data is available yet.
+        PacketDistributor.sendToPlayer(player, new SyncTotalPayload(total));
     }
 }

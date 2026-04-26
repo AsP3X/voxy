@@ -65,6 +65,7 @@ public final class ChunkGenerationManager {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean configReloadScheduled = new AtomicBoolean(false);
     private final AtomicBoolean userPaused = new AtomicBoolean(true); // starts stopped
+    private int syncTotalTickCounter = 0;
 
     // mode
     private volatile PregenMode pregenMode = PregenMode.NONE;
@@ -160,6 +161,7 @@ public final class ChunkGenerationManager {
 
     /** Start following players and generating their surroundings. */
     public void startDynamic() {
+        stats.reset();
         pregenMode = PregenMode.DYNAMIC;
         userPaused.set(false);
         scheduleConfigReload();
@@ -173,6 +175,7 @@ public final class ChunkGenerationManager {
      */
     public void startRegion(ResourceKey<Level> dimension,
                             int centerBlockX, int centerBlockZ, int blockRadius) {
+        stats.reset();
         regionDimension = dimension;
         regionMinCx = (centerBlockX - blockRadius) >> 4;
         regionMaxCx = (centerBlockX + blockRadius) >> 4;
@@ -209,6 +212,7 @@ public final class ChunkGenerationManager {
             ds.batchCounters.clear();
             ds.remainingInRadius.set(0);
         }
+        stats.reset();
         Logger.info("Voxy pregen stopped and task discarded (was {})", prev);
     }
 
@@ -315,7 +319,11 @@ public final class ChunkGenerationManager {
         }
 
         if (batch == null) {
-            // catch up on syncing
+            // Catch-up sync: collect work for ALL players in one pass, dispatch in one server.execute.
+            // Key: chunk positions → list of players that still need that chunk.
+            // This lets us build sections once per chunk regardless of how many players need it.
+            Map<ChunkPos, List<UUID>> chunkToPlayers = new java.util.LinkedHashMap<>();
+
             for (ServerPlayer player : players) {
                 var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
                 if (synced == null) continue;
@@ -323,27 +331,61 @@ public final class ChunkGenerationManager {
                 DimensionState ds = getOrSetupState((ServerLevel) player.level());
                 int radius = effectiveRadius(ds);
                 List<ChunkPos> syncBatch = new ArrayList<>();
-                ds.distanceGraph.collectCompletedInRange(player.chunkPosition(), radius, synced, syncBatch, 64);
+                // 256 chunks per player per pass — 4× the old cap
+                ds.distanceGraph.collectCompletedInRange(player.chunkPosition(), radius, synced, syncBatch, 256);
 
-                if (!syncBatch.isEmpty()) {
-                    final List<ChunkPos> finalSyncBatch = new ArrayList<>(syncBatch);
-                    final ServerLevel level = ds.level;
-                    final UUID playerUUID = player.getUUID();
-                    for (ChunkPos syncPos : finalSyncBatch) synced.add(syncPos.toLong());
-                    server.execute(() -> {
-                        ServerPlayer p = server.getPlayerList().getPlayer(playerUUID);
-                        if (p != null) {
-                            for (ChunkPos syncPos : finalSyncBatch) {
-                                LevelChunk c = level.getChunkSource().getChunk(syncPos.x, syncPos.z, false);
-                                if (c != null) VoxyWorldGenNetworking.sendLODData(p, c);
-                            }
-                        }
-                    });
-                    Thread.sleep(10);
-                    return;
+                if (syncBatch.isEmpty()) continue;
+
+                UUID pid = player.getUUID();
+                ResourceKey<Level> dimKey = ((ServerLevel) player.level()).dimension();
+                for (ChunkPos syncPos : syncBatch) {
+                    // Mark synced now to avoid re-queuing while server.execute is pending
+                    synced.add(syncPos.toLong());
+                    chunkToPlayers.computeIfAbsent(syncPos, k -> new ArrayList<>()).add(pid);
                 }
             }
-            Thread.sleep(100);
+
+            if (!chunkToPlayers.isEmpty()) {
+                // Snapshot dim→level map so server.execute closure doesn't hold live player refs
+                Map<UUID, ServerLevel> playerLevels = new java.util.HashMap<>();
+                for (ServerPlayer player : players) {
+                    playerLevels.put(player.getUUID(), (ServerLevel) player.level());
+                }
+                server.execute(() -> {
+                    for (var entry : chunkToPlayers.entrySet()) {
+                        ChunkPos syncPos = entry.getKey();
+                        List<UUID> pids  = entry.getValue();
+
+                        // Determine level from the first player (all share the same dim per collection above)
+                        ServerLevel level = null;
+                        for (UUID pid : pids) {
+                            level = playerLevels.get(pid);
+                            if (level != null) break;
+                        }
+                        if (level == null) continue;
+
+                        LevelChunk c = level.getChunkSource().getChunk(syncPos.x, syncPos.z, false);
+                        if (c == null) continue;
+
+                        // Build sections once for this chunk, send to every player that needs it
+                        var sections = VoxyWorldGenNetworking.buildSections(c);
+                        if (sections.isEmpty()) continue;
+
+                        int minY = c.getMinSection();
+                        ResourceKey<Level> dim = level.dimension();
+                        for (UUID pid : pids) {
+                            ServerPlayer p = server.getPlayerList().getPlayer(pid);
+                            if (p != null) {
+                                VoxyWorldGenNetworking.sendLODDataPrebuilt(p, dim, syncPos, minY, sections);
+                            }
+                        }
+                    }
+                });
+                // Yield briefly so the server thread can actually drain the queue
+                Thread.sleep(5);
+                return;
+            }
+            Thread.sleep(50);
             return;
         }
 
@@ -519,6 +561,15 @@ public final class ChunkGenerationManager {
         for (ServerLevel level : activeLevels) {
             ChunkUpdateTracker.getInstance().processDirty(level);
         }
+
+        // Broadcast sync totals to all players every 5 seconds so the client
+        // progress bar stays accurate as chunks get generated and the player moves.
+        if (++syncTotalTickCounter >= 100) {
+            syncTotalTickCounter = 0;
+            for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
+                VoxyWorldGenNetworking.sendSyncTotal(player);
+            }
+        }
     }
 
     private void checkPlayerMovement() {
@@ -653,7 +704,7 @@ public final class ChunkGenerationManager {
         if (state.completedChunks.add(key)) {
             stats.incrementCompleted();
             state.distanceGraph.markChunkCompleted(pos.x, pos.z);
-            state.remainingInRadius.decrementAndGet();
+            state.remainingInRadius.updateAndGet(v -> Math.max(0, v - 1));
         } else {
             stats.incrementSkipped();
             state.distanceGraph.markChunkCompleted(pos.x, pos.z);
@@ -737,4 +788,18 @@ public final class ChunkGenerationManager {
     public int getRegionCenterBlockX() { return ((regionMinCx + regionMaxCx) >> 1) << 4; }
     public int getRegionCenterBlockZ() { return ((regionMinCz + regionMaxCz) >> 1) << 4; }
     public int getRegionRadiusBlocks() { return ((regionMaxCx - regionMinCx) >> 1) << 4; }
+
+    /**
+     * Returns the total number of completed LOD chunks within the player's effective radius.
+     * Forces the dimension state to be loaded from persistence if not already done, so it
+     * works correctly even when pregen is stopped.
+     * Must be called on the server thread.
+     */
+    public long computeSyncTotal(ServerLevel level, ChunkPos playerPos) {
+        if (!running.get()) return 0;
+        DimensionState ds = getOrSetupState(level);
+        ensureDimensionLoaded(ds, level, level.dimension());
+        int radius = effectiveRadius(ds);
+        return ds.distanceGraph.countCompletedInRange(playerPos, radius);
+    }
 }

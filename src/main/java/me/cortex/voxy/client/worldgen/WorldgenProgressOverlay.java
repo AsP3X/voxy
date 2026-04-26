@@ -32,6 +32,7 @@ public final class WorldgenProgressOverlay {
     // State tracking across frames
     private static boolean wasRunning = false;
     private static long peakRemaining = 0;
+    private static long networkPeakReceived = 0;
     private static float animPhase = 0f;
 
     private WorldgenProgressOverlay() {}
@@ -54,9 +55,13 @@ public final class WorldgenProgressOverlay {
         boolean taskActive = localRunning && mode != ChunkGenerationManager.PregenMode.NONE;
         boolean networkActive = NetworkState.isServerConnected();
 
-        // Reset peak when a new run begins
+        // Reset peaks when a new run begins
         if (taskActive && !wasRunning) {
             peakRemaining = 0;
+        }
+        // Reset network peak when disconnecting from a server
+        if (!networkActive) {
+            networkPeakReceived = 0;
         }
         wasRunning = taskActive;
 
@@ -122,19 +127,40 @@ public final class WorldgenProgressOverlay {
     private static void renderNetwork(GuiGraphics gfx, Font font, float partialTick) {
         double cps    = NetworkState.getReceiveRate();
         long received = NetworkState.getChunksReceived();
+        long total    = NetworkState.getTotalToSync();
         double kbps   = NetworkState.getBandwidthRate() / 1024.0;
 
+        // Hide once all expected chunks have arrived
+        if (total > 0 && received >= total) return;
+
+        // Use a running peak so progress never goes backwards if total updates
+        if (received > networkPeakReceived) networkPeakReceived = received;
+
+        boolean determinate = total > 0;
+        // Clamp progress so bar never exceeds 100 % (total can be a slight undercount)
+        double progress = determinate ? Math.min(1.0, (double) received / total) : 0.0;
+
         String titleStr = "Voxy LOD Sync";
-        String statsStr = String.format(Locale.ROOT,
-                "%,d received  \u00b7  %.1f c/s  \u00b7  %.1f KB/s", received, cps, kbps);
+        String pctStr   = determinate
+                ? String.format(Locale.ROOT, "%.1f%%", progress * 100.0)
+                : null;
+        String statsStr = determinate
+                ? String.format(Locale.ROOT, "%,d / %,d chunks  \u00b7  %.1f c/s  \u00b7  %.1f KB/s",
+                        received, total, cps, kbps)
+                : String.format(Locale.ROOT, "%,d chunks received  \u00b7  %.1f c/s  \u00b7  %.1f KB/s",
+                        received, cps, kbps);
 
         int sw   = gfx.guiWidth();
         int panX = sw / 2 - PANEL_W / 2;
         int panY = 12;
 
         drawBackground(gfx, panX, panY, false, false);
-        drawTitleRow(gfx, font, panX, panY, titleStr, null, 0xFFCCEEFF, 0);
-        drawAnimatedBar(gfx, panX, panY, partialTick);
+        drawTitleRow(gfx, font, panX, panY, titleStr, pctStr, 0xFFCCEEFF, 0xFF00FFCC);
+        if (determinate) {
+            drawBar(gfx, panX, panY, progress, false, false, partialTick);
+        } else {
+            drawAnimatedBar(gfx, panX, panY, partialTick);
+        }
         drawStats(gfx, font, panX, panY, statsStr);
     }
 

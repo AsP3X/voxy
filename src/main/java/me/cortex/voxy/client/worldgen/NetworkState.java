@@ -6,6 +6,7 @@ public final class NetworkState {
     private static boolean serverConnected;
     private static final AtomicLong chunksReceived = new AtomicLong();
     private static final AtomicLong bytesReceived = new AtomicLong();
+    private static volatile long totalToSync = 0;
     private static double receiveRate;
     private static double bandwidthRate;
     private static long lastUpdateTime;
@@ -19,6 +20,7 @@ public final class NetworkState {
         if (!connected) {
             chunksReceived.set(0);
             bytesReceived.set(0);
+            totalToSync = 0;
             receiveRate = 0;
             bandwidthRate = 0;
             lastUpdateTime = 0;
@@ -26,6 +28,9 @@ public final class NetworkState {
             lastByteCount = 0;
         }
     }
+
+    public static void setTotalToSync(long total) { totalToSync = total; }
+    public static long getTotalToSync() { return totalToSync; }
 
     public static boolean isServerConnected() {
         return serverConnected;
