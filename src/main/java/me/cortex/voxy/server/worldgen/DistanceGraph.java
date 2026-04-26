@@ -324,6 +324,176 @@ public class DistanceGraph {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Square / AABB variants
+
+    private static boolean nodeIntersects(int nx, int nz, int size, int minBx, int maxBx, int minBz, int maxBz) {
+        return nx * size <= maxBx && nx * size + size - 1 >= minBx
+            && nz * size <= maxBz && nz * size + size - 1 >= minBz;
+    }
+
+    /**
+     * Find the nearest incomplete batch whose 4x4 chunk footprint intersects the
+     * axis-aligned square {@code [minCx,maxCx] × [minCz,maxCz]} (chunk coords).
+     * Only chunks that are strictly within the bounds are included in the returned
+     * batch list, so boundary batches may contain fewer than 16 positions.
+     */
+    public List<ChunkPos> findWorkInBounds(int minCx, int minCz, int maxCx, int maxCz, Set<Long> trackedBatches) {
+        int minBx = minCx >> BATCH_SIZE_SHIFT;
+        int minBz = minCz >> BATCH_SIZE_SHIFT;
+        int maxBx = maxCx >> BATCH_SIZE_SHIFT;
+        int maxBz = maxCz >> BATCH_SIZE_SHIFT;
+        int cbx   = (minBx + maxBx) >> 1;
+        int cbz   = (minBz + maxBz) >> 1;
+
+        PriorityQueue<WorkItem> queue = new PriorityQueue<>(Comparator.comparingDouble(i -> i.distSq));
+
+        int rootSize = 1 << ROOT_SIZE_SHIFT;
+        int rbxMin = Math.floorDiv(minBx, rootSize);
+        int rbxMax = Math.floorDiv(maxBx, rootSize);
+        int rbzMin = Math.floorDiv(minBz, rootSize);
+        int rbzMax = Math.floorDiv(maxBz, rootSize);
+
+        for (int rx = rbxMin; rx <= rbxMax; rx++) {
+            for (int rz = rbzMin; rz <= rbzMax; rz++) {
+                if (!nodeIntersects(rx, rz, rootSize, minBx, maxBx, minBz, maxBz)) continue;
+                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                queue.add(new WorkItem(root, 3, rx, rz, getDistSq(rx, rz, rootSize, cbx, cbz)));
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            WorkItem item = queue.poll();
+            if (item.node != null && item.node.isFull()) continue;
+
+            if (item.level == 0) {
+                long key = ChunkPos.asLong(item.x, item.z);
+                if (trackedBatches.add(key)) {
+                    List<ChunkPos> batch = new ArrayList<>(16);
+                    for (int lz = 0; lz < 4; lz++) {
+                        for (int lx = 0; lx < 4; lx++) {
+                            int cx = (item.x << BATCH_SIZE_SHIFT) + lx;
+                            int cz = (item.z << BATCH_SIZE_SHIFT) + lz;
+                            if (cx >= minCx && cx <= maxCx && cz >= minCz && cz <= maxCz) {
+                                batch.add(new ChunkPos(cx, cz));
+                            }
+                        }
+                    }
+                    if (!batch.isEmpty()) return batch;
+                    trackedBatches.remove(key); // batch entirely outside bounds
+                }
+                continue;
+            }
+
+            int childLevel = item.level - 1;
+            int childSize  = 1 << (3 * childLevel);
+            for (int i = 0; i < 64; i++) {
+                if (item.node != null && (item.node.fullMask & (1L << i)) != 0) continue;
+                int cx = (item.x << 3) + (i & 7);
+                int cz = (item.z << 3) + (i >> 3);
+                if (!nodeIntersects(cx, cz, childSize, minBx, maxBx, minBz, maxBz)) continue;
+                Object child = (item.node == null) ? null : item.node.children.get(i);
+                Node childNode = (child instanceof Node n) ? n : null;
+                queue.add(new WorkItem(childNode, childLevel, cx, cz, getDistSq(cx, cz, childSize, cbx, cbz)));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Count the number of incomplete chunks in the square region
+     * {@code [minCx,maxCx] × [minCz,maxCz]} (chunk coords).
+     */
+    public int countMissingInBounds(int minCx, int minCz, int maxCx, int maxCz) {
+        int minBx = minCx >> BATCH_SIZE_SHIFT;
+        int minBz = minCz >> BATCH_SIZE_SHIFT;
+        int maxBx = maxCx >> BATCH_SIZE_SHIFT;
+        int maxBz = maxCz >> BATCH_SIZE_SHIFT;
+
+        int rootSize = 1 << ROOT_SIZE_SHIFT;
+        int rbxMin = Math.floorDiv(minBx, rootSize);
+        int rbxMax = Math.floorDiv(maxBx, rootSize);
+        int rbzMin = Math.floorDiv(minBz, rootSize);
+        int rbzMax = Math.floorDiv(maxBz, rootSize);
+
+        int count = 0;
+        for (int rx = rbxMin; rx <= rbxMax; rx++) {
+            for (int rz = rbzMin; rz <= rbzMax; rz++) {
+                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                count += recursiveCountBounds(root, 3, rx, rz, minBx, maxBx, minBz, maxBz, minCx, maxCx, minCz, maxCz);
+            }
+        }
+        return count;
+    }
+
+    private int recursiveCountBounds(Node node, int level, int nx, int nz,
+                                     int minBx, int maxBx, int minBz, int maxBz,
+                                     int minCx, int maxCx, int minCz, int maxCz) {
+        int size = 1 << (3 * level);
+        if (!nodeIntersects(nx, nz, size, minBx, maxBx, minBz, maxBz)) return 0;
+        if (node != null && node.isFull()) return 0;
+
+        if (level == 1) {
+            int c = 0;
+            for (int i = 0; i < 64; i++) {
+                if (node != null && (node.fullMask & (1L << i)) != 0) continue;
+                int bx = (nx << 3) + (i & 7);
+                int bz = (nz << 3) + (i >> 3);
+                // batch (bx,bz) covers chunks [bx*4, bx*4+3] × [bz*4, bz*4+3]
+                int bMinCx = bx << BATCH_SIZE_SHIFT;
+                int bMaxCx = bMinCx + 3;
+                int bMinCz = bz << BATCH_SIZE_SHIFT;
+                int bMaxCz = bMinCz + 3;
+                int aMinCx = Math.max(bMinCx, minCx);
+                int aMaxCx = Math.min(bMaxCx, maxCx);
+                int aMinCz = Math.max(bMinCz, minCz);
+                int aMaxCz = Math.min(bMaxCz, maxCz);
+                if (aMinCx > aMaxCx || aMinCz > aMaxCz) continue;
+                int completedMask = (node == null) ? 0 : (int) node.children.getOrDefault(i, 0);
+                for (int lz = aMinCz - bMinCz; lz <= aMaxCz - bMinCz; lz++) {
+                    for (int lx = aMinCx - bMinCx; lx <= aMaxCx - bMinCx; lx++) {
+                        if ((completedMask & (1 << (lx + (lz << 2)))) == 0) c++;
+                    }
+                }
+            }
+            return c;
+        }
+
+        // node == null means all space in this region is ungenerated — count chunks
+        if (node == null) {
+            if (level == 2) {
+                // Recurse to level-1 null nodes
+                int c = 0;
+                for (int i = 0; i < 64; i++) {
+                    int cx = (nx << 3) + (i & 7);
+                    int cz = (nz << 3) + (i >> 3);
+                    c += recursiveCountBounds(null, 1, cx, cz, minBx, maxBx, minBz, maxBz, minCx, maxCx, minCz, maxCz);
+                }
+                return c;
+            }
+            // level 3+: recurse through null
+            int c = 0;
+            for (int i = 0; i < 64; i++) {
+                int cx = (nx << 3) + (i & 7);
+                int cz = (nz << 3) + (i >> 3);
+                c += recursiveCountBounds(null, level - 1, cx, cz, minBx, maxBx, minBz, maxBz, minCx, maxCx, minCz, maxCz);
+            }
+            return c;
+        }
+
+        // partial non-null higher-level node
+        int c = 0;
+        for (int i = 0; i < 64; i++) {
+            if ((node.fullMask & (1L << i)) != 0) continue;
+            int cx = (nx << 3) + (i & 7);
+            int cz = (nz << 3) + (i >> 3);
+            Object child = node.children.get(i);
+            Node childNode = (child instanceof Node n) ? n : null;
+            c += recursiveCountBounds(childNode, level - 1, cx, cz, minBx, maxBx, minBz, maxBz, minCx, maxCx, minCz, maxCz);
+        }
+        return c;
+    }
+
     public static long getBatchKey(int cx, int cz) {
         return ChunkPos.asLong(cx >> 2, cz >> 2);
     }
