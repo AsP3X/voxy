@@ -31,6 +31,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntSupplier;
+import java.util.Locale;
 
 public final class ChunkGenerationManager {
 
@@ -163,10 +164,19 @@ public final class ChunkGenerationManager {
     // -------------------------------------------------------------------------
     // Control API
 
+    /** Clears 4x4 batch bookkeeping so findWorkInBounds can claim work after a new pregen start. */
+    private void clearPregenBatchStateAllDimensions() {
+        for (DimensionState ds : dimensionStates.values()) {
+            ds.trackedBatches.clear();
+            ds.batchCounters.clear();
+        }
+    }
+
     /** Start following players and generating their surroundings. */
     public void startDynamic() {
         stats.reset();
         regionGraph = null;
+        clearPregenBatchStateAllDimensions();
         pregenMode = PregenMode.DYNAMIC;
         userPaused.set(false);
         scheduleConfigReload();
@@ -181,6 +191,8 @@ public final class ChunkGenerationManager {
     public void startRegion(ResourceKey<Level> dimension,
                             int centerBlockX, int centerBlockZ, int blockRadius) {
         stats.reset();
+        // Fresh region run — must not leave stale 4x4 batch keys that block findWorkInBounds().
+        clearPregenBatchStateAllDimensions();
         regionDimension = dimension;
         regionMinCx = (centerBlockX - blockRadius) >> 4;
         regionMaxCx = (centerBlockX + blockRadius) >> 4;
@@ -192,26 +204,39 @@ public final class ChunkGenerationManager {
         // and any boundary phantom-completions stay here, never touching the shared
         // DimensionState.distanceGraph used by dynamic pregen.
         DistanceGraph rg = new DistanceGraph();
+        int missingInRegion = 0;
+        ServerLevel regionLevel = null;
         if (server != null) {
-            ServerLevel level = server.getLevel(dimension);
-            if (level != null) {
-                DimensionState ds = getOrSetupState(level);
-                ensureDimensionLoaded(ds, level, dimension);
+            regionLevel = server.getLevel(dimension);
+            if (regionLevel != null) {
+                DimensionState ds = getOrSetupState(regionLevel);
+                ensureDimensionLoaded(ds, regionLevel, dimension);
                 synchronized (ds.completedChunks) {
                     for (long pos : ds.completedChunks) {
                         rg.markChunkCompleted(ChunkPos.getX(pos), ChunkPos.getZ(pos));
                     }
                 }
-                ds.remainingInRadius.set(rg.countMissingInBounds(
-                        regionMinCx, regionMinCz, regionMaxCx, regionMaxCz));
+                missingInRegion = rg.countMissingInBounds(
+                        regionMinCx, regionMinCz, regionMaxCx, regionMaxCz);
+                ds.remainingInRadius.set(missingInRegion);
             }
         }
         regionGraph = rg;
 
         pregenMode = PregenMode.REGION;
         userPaused.set(false);
-        Logger.info("Voxy pregen started region: dim={}, chunks=[{},{} → {},{}]",
-                dimension.location(), regionMinCx, regionMinCz, regionMaxCx, regionMaxCz);
+        scheduleConfigReload();
+        // Logger joins varargs; do not use slf4j {@code {}}-style here.
+        Logger.info(String.format(Locale.ROOT,
+                "Voxy pregen started region: dim=%s, chunk bounds cx=[%d,%d] cz=[%d,%d] (%d chunk columns still to generate; cache may already mark many as done).",
+                dimension.location(), regionMinCx, regionMaxCx, regionMinCz, regionMaxCz, missingInRegion));
+        if (missingInRegion == 0) {
+            var p = regionLevel != null ? ChunkPersistence.getGenerationCachePath(regionLevel, dimension) : null;
+            Logger.warn("Voxy region pregen has nothing to do: every column in that range is already recorded in the "
+                    + "voxy pregen cache. The worker will idle until you /voxy pregen stop, pick a new area, or delete "
+                    + "the cache file to reset progress"
+                    + (p != null ? (": " + p) : " (world/voxy_gen_*.bin)") + ".");
+        }
     }
 
     /** Stop any active task and discard it. Requires a new start command to resume. */
@@ -227,7 +252,7 @@ public final class ChunkGenerationManager {
         }
         regionGraph = null;
         stats.reset();
-        Logger.info("Voxy pregen stopped and task discarded (was {})", prev);
+        Logger.info("Voxy pregen stopped and task discarded (was " + prev + ")");
     }
 
     /** Pause mid-task — can be resumed with {@link #resume()}. */
@@ -438,7 +463,7 @@ public final class ChunkGenerationManager {
     private void ensureDimensionLoaded(DimensionState state, ServerLevel level, ResourceKey<Level> key) {
         if (state.loaded) return;
         if (state.tellusActive) {
-            Logger.info("tellus world detected for {}, enabling fast generation", key);
+            Logger.info("tellus world detected for " + key + ", enabling fast generation");
         }
         ChunkPersistence.load(level, key, state.completedChunks);
         synchronized (state.completedChunks) {
@@ -453,12 +478,14 @@ public final class ChunkGenerationManager {
         long batchKey = DistanceGraph.getBatchKey(batch.get(0).x, batch.get(0).z);
         finalState.batchCounters.put(batchKey, new AtomicInteger(batch.size()));
 
+        // Only "completed" is done voxy work. "tracked" = load still in progress — do not call
+        // onSuccess here, or we mark the column done before the chunk exists and break batch/counter state.
         List<ChunkPos> preFiltered = new ArrayList<>(batch.size());
         for (ChunkPos pos : batch) {
             long key = pos.toLong();
-            if (finalState.completedChunks.contains(key) || finalState.trackedChunks.contains(key)) {
+            if (finalState.completedChunks.contains(key)) {
                 onSuccess(finalState, pos);
-            } else {
+            } else if (!finalState.trackedChunks.contains(key)) {
                 preFiltered.add(pos);
             }
         }

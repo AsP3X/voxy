@@ -104,24 +104,59 @@ public class VoxyClientInstance extends VoxyInstance {
         if (iserver != null) {
             basePath = iserver.getWorldPath(LevelResource.ROOT).resolve("voxy");
         } else {
-            var netHandle = Minecraft.getInstance().gameMode;
-            if (netHandle == null) {
-                Logger.error("Network handle null");
-                basePath = basePath.resolve("UNKNOWN");
-            } else {
-                var info = netHandle.connection.getServerData();
-                if (info == null) {
-                    Logger.error("Server info null");
-                    basePath = basePath.resolve("UNKNOWN");
-                } else {
-                    if (info.ip == null || info.ip.isEmpty()) {
-                        basePath = basePath.resolve("realms");
-                    } else {
-                        basePath = basePath.resolve(info.ip.replace(":", "_"));
-                    }
-                }
-            }
+            String sub = resolveMultiplayerSaveSubdir();
+            basePath = basePath.resolve(sub);
         }
         return basePath.toAbsolutePath();
+    }
+
+    /**
+     * Folder name under {@code .voxy/saves/} for the connected remote server.
+     * {@link Minecraft#gameMode} is still null while {@link me.cortex.voxy.client.mixin.minecraft.MixinClientPacketListener}
+     * runs at {@code handleLogin} HEAD, so we also consult {@link Minecraft#getConnection()}.
+     */
+    private static String resolveMultiplayerSaveSubdir() {
+        Minecraft mc = Minecraft.getInstance();
+        var fromMode = tryServerDataFromGameMode(mc);
+        if (fromMode != null) {
+            return fromMode;
+        }
+        var listener = mc.getConnection();
+        if (listener == null) {
+            Logger.error("Client connection null — cannot resolve remote server for voxy storage");
+            return "UNKNOWN";
+        }
+        var info = listener.getServerData();
+        if (info != null) {
+            return subdirFromServerData(info);
+        }
+        // Direct connect / early login: no ServerData (e.g. "localhost" from server list may still be missing)
+        var conn = listener.getConnection();
+        if (conn != null) {
+            var remote = conn.getRemoteAddress();
+            if (remote != null) {
+                return remote.toString().replace(":", "_");
+            }
+        }
+        Logger.error("Server info null");
+        return "UNKNOWN";
+    }
+
+    private static String tryServerDataFromGameMode(Minecraft mc) {
+        if (mc.gameMode == null) {
+            return null;
+        }
+        var info = mc.gameMode.connection.getServerData();
+        if (info == null) {
+            return null;
+        }
+        return subdirFromServerData(info);
+    }
+
+    private static String subdirFromServerData(net.minecraft.client.multiplayer.ServerData info) {
+        if (info.ip == null || info.ip.isEmpty()) {
+            return "realms";
+        }
+        return info.ip.replace(":", "_");
     }
 }

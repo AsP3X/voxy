@@ -17,8 +17,10 @@ public class ChunkPersistence {
         if (level == null || dimKey == null) return;
         
         try {
-            String dimId = getDimensionId(dimKey);
-            Path savePath = level.getServer().getWorldPath(LevelResource.ROOT).resolve("voxy_gen_" + dimId + ".bin");
+            Path savePath = getGenerationCachePath(level, dimKey);
+            if (savePath == null) {
+                return;
+            }
             try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(savePath)))) {
                 synchronized(completedChunks) {
                     out.writeInt(completedChunks.size());
@@ -32,21 +34,33 @@ public class ChunkPersistence {
         }
     }
     
+    /**
+     * World-root file where completed chunk column keys are stored for a dimension
+     * (used to resume / skip voxy pregen). Deleting it forces a full re-run for that dimension.
+     */
+    public static Path getGenerationCachePath(ServerLevel level, ResourceKey<Level> dimKey) {
+        if (level == null || dimKey == null) {
+            return null;
+        }
+        String dimId = getDimensionId(dimKey);
+        return level.getServer().getWorldPath(LevelResource.ROOT).resolve("voxy_gen_" + dimId + ".bin");
+    }
+
     public static void load(ServerLevel level, ResourceKey<Level> dimKey, Set<Long> completedChunks) {
         completedChunks.clear();
         if (level == null || dimKey == null) return;
         
         try {
-            String dimId = getDimensionId(dimKey);
-            Path savePath = level.getServer().getWorldPath(LevelResource.ROOT).resolve("voxy_gen_" + dimId + ".bin");
-            if (Files.exists(savePath)) {
+            Path savePath = getGenerationCachePath(level, dimKey);
+            if (savePath != null && Files.exists(savePath)) {
                 try (DataInputStream in = new DataInputStream(new BufferedInputStream(Files.newInputStream(savePath)))) {
                     int count = in.readInt();
                     for (int i = 0; i < count; i++) {
                         completedChunks.add(in.readLong());
                     }
                 }
-                Logger.info("loaded {} chunks from voxy generation cache for {}", completedChunks.size(), dimKey);
+                Logger.info("loaded " + completedChunks.size() + " chunks from voxy generation cache for " + dimKey
+                        + " (file: " + savePath + ")");
             }
         } catch (Exception e) {
             Logger.error("failed to load chunk generation cache", e);

@@ -1,6 +1,7 @@
 package me.cortex.voxy.common;
 
 import me.cortex.voxy.common.config.Serialization;
+import me.cortex.voxy.common.config.compressors.LZ4Compressor;
 import me.cortex.voxy.common.config.compressors.ZSTDCompressor;
 import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.config.section.SectionStorageConfig;
@@ -66,6 +67,22 @@ public class StorageConfigUtil {
         var serializer = new SectionSerializationStorage.Config();
         serializer.storage = compression;
 
+        return serializer;
+    }
+
+    /**
+     * Default section storage for dedicated server: LZ4 (lz4-java) instead of ZSTD, because
+     * {@link me.cortex.voxy.common.config.compressors.ZSTDCompressor} needs LWJGL, which is not
+     * available in the mod module graph on a headless forgeserver.
+     */
+    public static SectionSerializationStorage.Config createDefaultSerializerForDedicatedServer() {
+        var baseDB = new RocksDBStorageBackend.Config();
+        var compressor = new LZ4Compressor.Config();
+        var compression = new CompressionStorageAdaptor.Config();
+        compression.delegate = baseDB;
+        compression.compressor = compressor;
+        var serializer = new SectionSerializationStorage.Config();
+        serializer.storage = compression;
         return serializer;
     }
 }
