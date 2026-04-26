@@ -4,6 +4,7 @@ import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.server.mixin.ServerChunkCacheInvoker;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -86,6 +87,16 @@ public final class ChunkGenerationManager {
     private ResourceKey<Level> currentDimensionKey = null;
     private ServerLevel currentLevel = null;
     private final java.util.Map<java.util.UUID, ChunkPos> lastPlayerPositions = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Batches of completed columns with nothing loaded in-world yet: wait before treating as "defer". */
+    private final java.util.Map<java.util.UUID, Integer> joinResyncUnloadedStreak
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Chunk column keys the join resync should not re-query from the distance graph (unloaded for several
+     * backoffs, or loaded but with no voxy-relevant section data). Does not go into the player's
+     * "synced" set — so chunk load can still send LOD when a column later loads.
+     */
+    private final java.util.Map<java.util.UUID, LongOpenHashSet> joinResyncCollectSkip
+            = new java.util.concurrent.ConcurrentHashMap<>();
     private java.util.function.BooleanSupplier pauseCheck = () -> false;
     // Effective generation radius — client may inject a tighter bound via Voxy render distance
     private IntSupplier effectiveRadiusSupplier = () -> VoxyWorldGenConfig.DATA.generationRadius;
@@ -159,6 +170,8 @@ public final class ChunkGenerationManager {
         currentLevel = null;
         lastPlayerPositions.clear();
         pregenMode = PregenMode.NONE;
+        joinResyncUnloadedStreak.clear();
+        joinResyncCollectSkip.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -839,6 +852,125 @@ public final class ChunkGenerationManager {
     public int getRegionCenterBlockX() { return ((regionMinCx + regionMaxCx) >> 1) << 4; }
     public int getRegionCenterBlockZ() { return ((regionMinCz + regionMaxCz) >> 1) << 4; }
     public int getRegionRadiusBlocks() { return ((regionMaxCx - regionMinCx) >> 1) << 4; }
+
+    /**
+     * Push server-side voxy LOD for every completed column in this player's voxy sync radius, in small
+     * batches over successive ticks. Call after login so a joiner matches clients who already had
+     * those chunks (already-loaded areas do not re-fire {@link net.neoforged.neoforge.event.level.ChunkEvent.Load}).
+     * <p>Uses the same distance graph and section payloads as the worldgen catch-up; runs even when
+     * pregen is stopped (the background catch-up only runs with an active pregen task).
+     * Must be scheduled on the main server thread; first step runs in {@code tick+1} via a {@link TickTask}.
+     */
+    public void scheduleJoinLodResync(java.util.UUID playerId) {
+        if (server == null || !running.get()) {
+            return;
+        }
+        // Fresh join: do not keep stale "defer" state from a previous half-finished resync
+        joinResyncUnloadedStreak.remove(playerId);
+        joinResyncCollectSkip.remove(playerId);
+        server.tell(new TickTask(server.getTickCount() + 1, () -> runJoinResyncStep(playerId)));
+    }
+
+    public void clearJoinResyncState(java.util.UUID playerId) {
+        joinResyncUnloadedStreak.remove(playerId);
+        joinResyncCollectSkip.remove(playerId);
+    }
+
+    private void runJoinResyncStep(java.util.UUID playerId) {
+        if (server == null) {
+            return;
+        }
+        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+        if (player == null) {
+            clearJoinResyncState(playerId);
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel level)) {
+            clearJoinResyncState(playerId);
+            return;
+        }
+
+        DimensionState ds = getOrSetupState(level);
+        ensureDimensionLoaded(ds, level, level.dimension());
+        int radius = effectiveRadius(ds);
+        LongSet synced = PlayerTracker.getInstance().getSyncedChunks(playerId);
+        if (synced == null) {
+            clearJoinResyncState(playerId);
+            return;
+        }
+
+        LongSet alreadyHandledForCollect = new LongOpenHashSet(synced);
+        LongOpenHashSet extra = joinResyncCollectSkip.get(playerId);
+        if (extra != null) {
+            alreadyHandledForCollect.addAll(extra);
+        }
+
+        List<ChunkPos> batch = new ArrayList<>();
+        ds.distanceGraph.collectCompletedInRange(
+                player.chunkPosition(), radius, alreadyHandledForCollect, batch, 256);
+        if (batch.isEmpty()) {
+            clearJoinResyncState(playerId);
+            return;
+        }
+
+        int sent = 0;
+        boolean anyColumnLoaded = false;
+        for (ChunkPos pos : batch) {
+            if (!level.hasChunk(pos.x, pos.z)) {
+                continue;
+            }
+            anyColumnLoaded = true;
+            LevelChunk c = level.getChunk(pos.x, pos.z);
+            if (c == null) {
+                continue;
+            }
+            var sections = VoxyWorldGenNetworking.buildSections(c);
+            if (sections.isEmpty()) {
+                joinResyncCollectSkip
+                        .computeIfAbsent(playerId, k -> new LongOpenHashSet())
+                        .add(pos.toLong());
+                continue;
+            }
+            VoxyWorldGenNetworking.sendLODDataPrebuilt(
+                    player, level.dimension(), pos, c.getMinSection(), sections);
+            sent++;
+        }
+
+        if (sent > 0) {
+            joinResyncUnloadedStreak.remove(playerId);
+            if (server.isRunning()) {
+                server.tell(new TickTask(server.getTickCount() + 1, () -> runJoinResyncStep(playerId)));
+            }
+            return;
+        }
+
+        if (anyColumnLoaded) {
+            // All loaded columns in this batch were air-only: skip them for further collect
+            // passes and try the next set on the next tick.
+            joinResyncUnloadedStreak.remove(playerId);
+            if (server.isRunning()) {
+                server.tell(new TickTask(server.getTickCount() + 1, () -> runJoinResyncStep(playerId)));
+            }
+            return;
+        }
+
+        int streak = joinResyncUnloadedStreak.merge(playerId, 1, Integer::sum);
+        if (streak < 6) {
+            if (server.isRunning()) {
+                server.tell(new TickTask(server.getTickCount() + 20, () -> runJoinResyncStep(playerId)));
+            }
+        } else {
+            joinResyncUnloadedStreak.remove(playerId);
+            LongOpenHashSet def = joinResyncCollectSkip.computeIfAbsent(
+                    playerId, k -> new LongOpenHashSet());
+            for (ChunkPos p : batch) {
+                def.add(p.toLong());
+            }
+            if (server.isRunning()) {
+                server.tell(new TickTask(server.getTickCount() + 1, () -> runJoinResyncStep(playerId)));
+            }
+        }
+    }
 
     /**
      * Returns the total number of completed LOD chunks within the player's effective radius.

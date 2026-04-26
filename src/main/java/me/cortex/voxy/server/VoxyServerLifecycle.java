@@ -57,14 +57,19 @@ public final class VoxyServerLifecycle {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         PlayerTracker.getInstance().addPlayer(player);
         VoxyWorldGenNetworking.sendHandshake(player);
-        // Send total after a small delay so the dimension state is loaded
+        // After the dimension is ready, align LOD sync state with existing players: send progress total
+        // and push voxy column data (already-generated chunks do not re-fire ChunkEvent.Load for joiners).
         player.getServer().tell(new net.minecraft.server.TickTask(
                 player.getServer().getTickCount() + 20,
-                () -> VoxyWorldGenNetworking.sendSyncTotal(player)));
+                () -> {
+                    VoxyWorldGenNetworking.sendSyncTotal(player);
+                    ChunkGenerationManager.getInstance().scheduleJoinLodResync(player.getUUID());
+                }));
     }
 
     private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        ChunkGenerationManager.getInstance().clearJoinResyncState(player.getUUID());
         PlayerTracker.getInstance().removePlayer(player);
     }
 

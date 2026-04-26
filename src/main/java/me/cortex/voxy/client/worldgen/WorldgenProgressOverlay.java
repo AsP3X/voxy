@@ -25,7 +25,8 @@ public final class WorldgenProgressOverlay {
     private static final int PANEL_H   = 37;
 
     private static boolean progressVisible = true;
-    private static boolean syncVisible = false;
+    /** Server LOD sync panel; on by default so multiplayer sync status is visible without /voxy. */
+    private static boolean syncVisible = true;
 
     public static boolean isProgressVisible() { return progressVisible; }
     public static void setProgressVisible(boolean v) { progressVisible = v; }

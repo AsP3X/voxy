@@ -88,6 +88,21 @@ public class VoxyCommands {
                                             "Voxy worldgen progress overlay disabled"), false);
                                     return 0;
                                 })))
+                .then(Commands.literal("server_sync")
+                        .then(Commands.literal("enabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setSyncVisible(true);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy server sync overlay enabled"), false);
+                                    return 0;
+                                }))
+                        .then(Commands.literal("disabled")
+                                .executes(ctx -> {
+                                    WorldgenProgressOverlay.setSyncVisible(false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "Voxy server sync overlay disabled"), false);
+                                    return 0;
+                                })))
                 .then(Commands.literal("sync")
                         .then(Commands.literal("enabled")
                                 .executes(ctx -> {
