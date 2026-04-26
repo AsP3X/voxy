@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.ZipFile;
 
 public class Serialization {
     public static final Set<Class<?>> CONFIG_TYPES = new HashSet<>();
@@ -103,12 +104,16 @@ public class Serialization {
                 var filePath = fileInfo.getFile().getFilePath();
                 if (filePath != null && java.nio.file.Files.isDirectory(filePath)) {
                     clazzs.addAll(collectAllClasses(filePath, BASE_SEARCH_PACKAGE));
+                } else if (filePath != null) {
+                    clazzs.addAll(collectAllClassesFromJar(filePath, BASE_SEARCH_PACKAGE));
                 }
             } catch (Exception e) {
                 Logger.error("Failed to list classes from voxy mod file", e);
             }
         }
-        clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
+        if (clazzs.isEmpty()) {
+            clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
+        }
         int count = 0;
         outer:
         for (var clzName : clazzs) {
@@ -199,6 +204,23 @@ public class Serialization {
             return List.of();
         }
     }
+    private static List<String> collectAllClassesFromJar(Path jarPath, String basePackage) {
+        String packagePrefix = basePackage.replace('.', '/') + "/";
+        try (var zipFile = new ZipFile(jarPath.toFile())) {
+            return zipFile.stream()
+                    .filter(entry -> !entry.isDirectory()
+                            && entry.getName().startsWith(packagePrefix)
+                            && entry.getName().endsWith(".class"))
+                    .map(entry -> entry.getName()
+                            .replace('/', '.')
+                            .replace(".class", ""))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            Logger.error("Failed to scan JAR for config classes: " + jarPath, e);
+            return List.of();
+        }
+    }
+
     private static List<String> collectAllClasses(Path base, String pack) {
         if (!Files.exists(base.resolve(pack.replaceAll("[.]", "/")))) {
             return List.of();

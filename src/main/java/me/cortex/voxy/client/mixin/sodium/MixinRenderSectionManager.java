@@ -13,7 +13,6 @@ import net.caffeinemc.mods.sodium.client.render.chunk.RenderSectionManager;
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.executor.ChunkBuilder;
 import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
-// import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.SortBehavior;
 import net.neoforged.fml.ModList;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.SectionPos;
@@ -35,7 +34,7 @@ public class MixinRenderSectionManager {
     @Unique
     private static final boolean BOBBY_INSTALLED = ModList.get() != null && ModList.get().isLoaded("bobby");
 
-    @Shadow @Final private ClientLevel world;
+    @Shadow @Final private ClientLevel level;
 
     @Shadow @Final private ChunkBuilder builder;
 
@@ -47,14 +46,13 @@ public class MixinRenderSectionManager {
                 system.chunkBoundRenderer.reset();
             }
         }
-        this.bottomSectionY = this.world.getMinBuildHeight()>>4;
+        this.bottomSectionY = this.level.getMinBuildHeight()>>4;
     }
 
     @Inject(method = "onChunkRemoved", at = @At("HEAD"))
     private void voxy$injectIngest(int x, int z, CallbackInfo ci) {
-        //TODO: Am not quite sure if this is right
         if (VoxyConfig.CONFIG.ingestEnabled && !BOBBY_INSTALLED) {
-            var cccm = (ICheekyClientChunkCache)this.world.getChunkSource();
+            var cccm = (ICheekyClientChunkCache)this.level.getChunkSource();
             if (cccm != null) {
                 var chunk = cccm.voxy$cheekyGetChunk(x, z);
                 if (chunk != null) {
@@ -67,8 +65,8 @@ public class MixinRenderSectionManager {
 
     @Inject(method = "onChunkAdded", at = @At("HEAD"))
     private void voxy$ingestOnAdd(int x, int z, CallbackInfo ci) {
-        if (this.world.levelRenderer != null && VoxyConfig.CONFIG.ingestEnabled) {
-            var cccm = this.world.getChunkSource();
+        if (this.level.levelRenderer != null && VoxyConfig.CONFIG.ingestEnabled) {
+            var cccm = this.level.getChunkSource();
             if (cccm != null) {
                 var chunk = cccm.getChunk(x, z, ChunkStatus.FULL, false);
                 if (chunk != null) {
@@ -78,60 +76,45 @@ public class MixinRenderSectionManager {
         }
     }
 
-    /*
-    @Inject(method = "onChunkRemoved", at = @At("HEAD"))
-    private void voxy$trackChunkRemove(int x, int z, CallbackInfo ci) {
-        if (this.world.worldRenderer != null) {
-            var system = ((IGetVoxyRenderSystem)(this.world.worldRenderer)).getVoxyRenderSystem();
-            if (system != null) {
-                system.chunkBoundRenderer.removeSection(ChunkPos.toLong(x, z));
-            }
-        }
-    }*/
-
     @Unique private long cachedChunkPos = -1;
     @Unique private int cachedChunkStatus;
     @Unique private int bottomSectionY;
 
-    @Redirect(method = "updateSectionInfo", at = @At(value = "INVOKE", target = "Lme/jellysquid/mods/sodium/client/render/chunk/RenderSection;setInfo(Lme/jellysquid/mods/sodium/client/render/chunk/data/BuiltSectionInfo;)V"))
-    private void voxy$updateOnUpload(RenderSection instance, BuiltSectionInfo info) {
+    @Redirect(method = "updateSectionInfo", at = @At(value = "INVOKE", target = "Lnet/caffeinemc/mods/sodium/client/render/chunk/RenderSection;setInfo(Lnet/caffeinemc/mods/sodium/client/render/chunk/data/BuiltSectionInfo;)Z"))
+    private boolean voxy$updateOnUpload(RenderSection instance, BuiltSectionInfo info) {
         boolean wasBuilt = instance.getFlags()!=0;
         int flags = instance.getFlags();
-        instance.setInfo(info);
+        boolean result = instance.setInfo(info);
         if (wasBuilt == (instance.getFlags()!=0)) {//Only want to do stuff on change
-            return;
+            return result;
         }
 
         flags |= instance.getFlags();
         if (flags == 0)//Only process things with stuff
-            return;
+            return result;
 
-        VoxyRenderSystem system = ((IGetVoxyRenderSystem)(this.world.levelRenderer)).voxy$getRenderSystem();
+        VoxyRenderSystem system = ((IGetVoxyRenderSystem)(this.level.levelRenderer)).voxy$getRenderSystem();
         if (system == null) {
-            return;
+            return result;
         }
         int x = instance.getChunkX(), y = instance.getChunkY(), z = instance.getChunkZ();
 
         if (wasBuilt && VoxyConfig.CONFIG.ingestEnabled) {
-            var tracker = ((AccessorChunkTracker)ChunkTrackerHolder.get(this.world)).getChunkStatus();
-            //in theory the cache value could be wrong but is so soso unlikely and at worst means we either duplicate ingest a chunk
-            // which... could be bad ;-; or we dont ingest atall which is ok!
+            var tracker = ((AccessorChunkTracker)ChunkTrackerHolder.get(this.level)).getChunkStatus();
             long key = ChunkPos.asLong(x, z);
             if (key != this.cachedChunkPos) {
                 this.cachedChunkPos = key;
                 this.cachedChunkStatus = tracker.getOrDefault(key, 0);
             }
             if (this.cachedChunkStatus == 3) {//If this chunk still has surrounding chunks
-                var section = this.world.getChunk(x,z).getSection(y-this.bottomSectionY);
-                var lp = this.world.getLightEngine();
+                var section = this.level.getChunk(x,z).getSection(y-this.bottomSectionY);
+                var lp = this.level.getLightEngine();
 
                 var csp = SectionPos.of(x, y, z);
                 var blp = lp.getLayerListener(LightLayer.BLOCK).getDataLayerData(csp);
                 var slp = lp.getLayerListener(LightLayer.SKY).getDataLayerData(csp);
 
-                //Note: we dont do this check and just blindly ingest, it shouldbe ok :tm:
-                //if (blp != null || slp != null)
-                    VoxelIngestService.rawIngest(system.getEngine(), section, x, y, z, blp == null ? null : blp.copy(), slp == null ? null : slp.copy());
+                VoxelIngestService.rawIngest(system.getEngine(), section, x, y, z, blp == null ? null : blp.copy(), slp == null ? null : slp.copy());
             }
         }
         
@@ -144,27 +127,20 @@ public class MixinRenderSectionManager {
         }
         long pos = SectionPos.asLong(x,y,z);
         if (wasBuilt) {//Remove
-            //TODO: on chunk remove do ingest if is surrounded by built chunks (or when the tracker says is ok)
-
             system.chunkBoundRenderer.removeSection(pos);
         } else {//Add — chunk newly built for the first time
             system.chunkBoundRenderer.addSection(pos);
 
-            // FIX: ingest newly explored chunks here, where Sodium has already compiled
-            // the geometry and lighting is guaranteed to be available. The onChunkAdded
-            // hook fires too early (before lighting arrives for freshly generated chunks).
             if (VoxyConfig.CONFIG.ingestEnabled) {
-                var tracker = ((AccessorChunkTracker)ChunkTrackerHolder.get(this.world)).getChunkStatus();
+                var tracker = ((AccessorChunkTracker)ChunkTrackerHolder.get(this.level)).getChunkStatus();
                 long key = ChunkPos.asLong(x, z);
                 if (key != this.cachedChunkPos) {
                     this.cachedChunkPos = key;
                     this.cachedChunkStatus = tracker.getOrDefault(key, 0);
                 }
-                // Status 3 = chunk has all surrounding neighbours loaded (LIGHT_AND_BIOMES),
-                // so lighting is complete and safe to read.
                 if (this.cachedChunkStatus == 3) {
-                    var section = this.world.getChunk(x, z).getSection(y - this.bottomSectionY);
-                    var lp = this.world.getLightEngine();
+                    var section = this.level.getChunk(x, z).getSection(y - this.bottomSectionY);
+                    var lp = this.level.getLightEngine();
                     var csp = SectionPos.of(x, y, z);
                     var blp = lp.getLayerListener(LightLayer.BLOCK).getDataLayerData(csp);
                     var slp = lp.getLayerListener(LightLayer.SKY).getDataLayerData(csp);
@@ -174,6 +150,6 @@ public class MixinRenderSectionManager {
                 }
             }
         }
-        return;
+        return result;
     }
 }
