@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntSupplier;
 
 public final class ChunkGenerationManager {
     private static final ChunkGenerationManager INSTANCE = new ChunkGenerationManager();
@@ -66,6 +67,8 @@ public final class ChunkGenerationManager {
     private ServerLevel currentLevel = null;
     private final java.util.Map<java.util.UUID, ChunkPos> lastPlayerPositions = new java.util.concurrent.ConcurrentHashMap<>();
     private java.util.function.BooleanSupplier pauseCheck = () -> false;
+    // Effective generation radius — client may inject a tighter bound via Voxy render distance
+    private IntSupplier effectiveRadiusSupplier = () -> VoxyWorldGenConfig.DATA.generationRadius;
 
     // worker
     private Thread workerThread;
@@ -187,7 +190,7 @@ public final class ChunkGenerationManager {
                 // try to find work around any player in their respective dimension
                 for (ServerPlayer player : players) {
                     DimensionState ds = getOrSetupState((ServerLevel) player.level());
-                    int radius = ds.tellusActive ? Math.max(VoxyWorldGenConfig.DATA.generationRadius, 128) : VoxyWorldGenConfig.DATA.generationRadius;
+                    int radius = effectiveRadius(ds);
                     batch = ds.distanceGraph.findWork(player.chunkPosition(), radius, ds.trackedBatches);
                     if (batch != null) {
                         activeState = ds;
@@ -203,7 +206,7 @@ public final class ChunkGenerationManager {
                         if (synced == null) continue;
                         
                         DimensionState ds = getOrSetupState((ServerLevel) player.level());
-                        int radius = ds.tellusActive ? Math.max(VoxyWorldGenConfig.DATA.generationRadius, 128) : VoxyWorldGenConfig.DATA.generationRadius;
+                        int radius = effectiveRadius(ds);
                         List<ChunkPos> syncBatch = new ArrayList<>();
                         ds.distanceGraph.collectCompletedInRange(player.chunkPosition(), radius, synced, syncBatch, 64);
                         
@@ -476,7 +479,7 @@ public final class ChunkGenerationManager {
         java.util.Map<DimensionState, Integer> maxCounts = new java.util.HashMap<>();
         for (ServerPlayer player : players) {
             DimensionState state = getOrSetupState((ServerLevel) player.level());
-            int radius = state.tellusActive ? Math.max(VoxyWorldGenConfig.DATA.generationRadius, 128) : VoxyWorldGenConfig.DATA.generationRadius;
+            int radius = effectiveRadius(state);
             int missing = state.distanceGraph.countMissingInRange(player.chunkPosition(), radius);
             maxCounts.merge(state, missing, Math::max);
         }
@@ -584,5 +587,21 @@ public final class ChunkGenerationManager {
     
     public void setPauseCheck(java.util.function.BooleanSupplier check) {
         this.pauseCheck = check;
+    }
+
+    /**
+     * Override the generation radius cap. The supplied value is clamped against
+     * {@link VoxyWorldGenConfig.ConfigData#generationRadius} so the worldgen config
+     * always acts as a hard ceiling. Pass {@code null} to restore the default.
+     */
+    public void setEffectiveRadiusSupplier(IntSupplier supplier) {
+        this.effectiveRadiusSupplier = supplier != null ? supplier : () -> VoxyWorldGenConfig.DATA.generationRadius;
+        scheduleConfigReload();
+    }
+
+    private int effectiveRadius(DimensionState ds) {
+        int configRadius = VoxyWorldGenConfig.DATA.generationRadius;
+        int effective = Math.min(effectiveRadiusSupplier.getAsInt(), configRadius);
+        return ds.tellusActive ? Math.max(effective, 128) : effective;
     }
 }

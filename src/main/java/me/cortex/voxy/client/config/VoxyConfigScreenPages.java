@@ -7,6 +7,7 @@ import me.cortex.voxy.client.core.SSAO;
 import me.cortex.voxy.client.core.util.IrisUtil;
 import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
 import me.cortex.voxy.commonImpl.VoxyCommon;
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import net.caffeinemc.mods.sodium.client.gui.options.*;
 import net.caffeinemc.mods.sodium.client.gui.options.control.CyclingControl;
 import net.caffeinemc.mods.sodium.client.gui.options.control.SliderControl;
@@ -145,6 +146,9 @@ public abstract class VoxyConfigScreenPages {
                                     vrs.setRenderDistance(s.sectionRenderDistance);
                                 }
                             }
+                            // Notify worldgen manager so it recomputes remaining chunks
+                            // with the new radius cap immediately.
+                            ChunkGenerationManager.getInstance().scheduleConfigReload();
                         }, s -> Math.round(s.sectionRenderDistance * 16))
                         .setImpact(OptionImpact.LOW)
                         .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)

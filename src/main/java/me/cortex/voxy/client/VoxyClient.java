@@ -4,11 +4,13 @@ import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.rendering.util.SharedIndexBuffer;
 import me.cortex.voxy.client.core.util.ExpansionUtil;
 import me.cortex.voxy.client.config.VoxyConfig;
+import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.worldgen.NetworkState;
 import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.VoxyWorldGenConfig;
 import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -101,6 +103,11 @@ public final class VoxyClient {
             Minecraft mc = Minecraft.getInstance();
             return mc != null && mc.isPaused();
         });
+        // Cap generation radius to the Voxy render distance chosen by the player.
+        // sectionRenderDistance is in LOD sections; each section covers 32 chunks of radius.
+        ChunkGenerationManager.getInstance().setEffectiveRadiusSupplier(
+                () -> Math.min(VoxyWorldGenConfig.DATA.generationRadius,
+                               VoxyConfig.CONFIG.sectionRenderDistance * 32));
         NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, e -> NetworkState.tick());
         NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, e -> NetworkState.setServerConnected(false));
     }
