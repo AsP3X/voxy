@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.141'
+    id 'com.gradleup.shadow' version '9.4.1'
     id 'idea'
 }
 
@@ -61,6 +62,11 @@ configurations {
     voxyEmbed
     voxyEmbed.setCanBeResolved(true)
     voxyEmbed.setCanBeConsumed(false)
+    // Raw sqlite-jdbc is shadow-relocated to avoid JPMS export clashes with other mods
+    // (e.g. grieflogger) that also embed org.sqlite.* in their automatic module.
+    sqliteToRelocate
+    sqliteToRelocate.setCanBeResolved(true)
+    sqliteToRelocate.setCanBeConsumed(false)
     runtimeClasspath.extendsFrom localRuntime
     implementation.extendsFrom voxyEmbed
 }
@@ -80,7 +86,7 @@ dependencies {
     // "reads more than one module named org.lz4.java" (e.g. with Sodium's service layer).
     compileOnly "org.lz4:lz4-java:1.8.0"
     voxyEmbed "org.tukaani:xz:1.10"
-    if (!isInGHA) { voxyEmbed "org.xerial:sqlite-jdbc:3.49.1.0" }
+    if (!isInGHA) { sqliteToRelocate "org.xerial:sqlite-jdbc:3.49.1.0" }
     // lwjgl base jar: do not embed. Minecraft + NeoForge already ship org.lwjgl:lwjgl on the
     // game module path. Bundling a second copy causes JPMS split-package errors such as
     // "Modules voxy and org.lwjgl export package org.lwjgl.system.windows to module
@@ -184,8 +190,25 @@ def rocksdbFilteredJar = tasks.register("rocksdbFilteredJar", Zip) {
     exclude { e -> e.name.endsWith(".jnilib") || rocksBad(e.name) }
 }
 
+// Relocate org.sqlite.* so the voxy automatic module does not export the same packages
+// as other mods that embed sqlite-jdbc (see java.lang.module.ResolutionException on launch).
+def relocateSqliteJar = tasks.register("relocateSqliteJar", com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    onlyIf { !isInGHA }
+    archiveFileName = "sqlite-jdbc-relocated.jar"
+    destinationDirectory = layout.buildDirectory.dir("tmp/relocateSqlite")
+    duplicatesStrategy = DuplicatesStrategy.WARN
+    from { zipTree(project.configurations.getByName("sqliteToRelocate").singleFile) }
+    mergeServiceFiles()
+    exclude "module-info.class"
+    relocate "org.sqlite", "me.cortex.voxy.shaded.org.sqlite"
+}
+if (!isInGHA) {
+    tasks.named("relocateSqliteJar") { dependsOn project.configurations.named("sqliteToRelocate") }
+}
+
 tasks.named("jar", Jar) {
     dependsOn compileJava21, rocksdbFilteredJar
+    if (!isInGHA) { dependsOn relocateSqliteJar }
     from(sourceSets.java21.output) { into "META-INF/versions/21" }
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     from { zipTree(rocksdbFilteredJar.get().archiveFile.get().asFile) }
@@ -193,8 +216,10 @@ tasks.named("jar", Jar) {
         configurations.voxyEmbed.getFiles().findAll { f ->
             f.name.contains("redis") || f.name.contains("commons-pool2")
                     || f.name.contains("tukaani") || f.name.startsWith("xz-")
-                    || (f.name.contains("sqlite") && f.name.contains("jdbc"))
         }.collect { zipTree(it) }
+    }
+    if (!isInGHA) {
+        from { zipTree(relocateSqliteJar.get().archiveFile.get().asFile) }
     }
     // Embed only the LMDB/ZSTD addon JARs (Java bindings + their natives).
     // The base lwjgl jar (and its natives) are intentionally excluded: Minecraft + NeoForge

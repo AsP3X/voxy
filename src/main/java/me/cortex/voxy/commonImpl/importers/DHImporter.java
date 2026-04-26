@@ -462,7 +462,8 @@ public class DHImporter implements IDataImporter {
     static {
         boolean hasJDBC = false;
         try {
-            Class.forName("org.sqlite.JDBC");
+            // Must match build.gradle shadow relocate of org.xerial:sqlite-jdbc
+            Class.forName("me.cortex.voxy.shaded.org.sqlite.JDBC");
             Class.forName("org.tukaani.xz.XZInputStream");
             hasJDBC = true;
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
