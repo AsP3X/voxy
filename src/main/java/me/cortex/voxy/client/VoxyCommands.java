@@ -9,6 +9,7 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.DebugUtils;
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
@@ -85,12 +86,45 @@ public class VoxyCommands {
                             return 0;
                         }));
 
+        var pregen = Commands.literal("pregen")
+                .then(Commands.literal("stop")
+                        .executes(ctx -> {
+                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+                            if (!mgr.isRunning()) {
+                                ctx.getSource().sendFailure(Component.literal("Voxy pre-generation is not running"));
+                                return 1;
+                            }
+                            if (mgr.isUserPaused()) {
+                                ctx.getSource().sendFailure(Component.literal("Voxy pre-generation is already stopped"));
+                                return 1;
+                            }
+                            mgr.setUserPaused(true);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Voxy pre-generation stopped"), false);
+                            return 0;
+                        }))
+                .then(Commands.literal("start")
+                        .executes(ctx -> {
+                            ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+                            if (!mgr.isRunning()) {
+                                ctx.getSource().sendFailure(Component.literal("Voxy pre-generation is not running"));
+                                return 1;
+                            }
+                            if (!mgr.isUserPaused()) {
+                                ctx.getSource().sendFailure(Component.literal("Voxy pre-generation is already running"));
+                                return 1;
+                            }
+                            mgr.setUserPaused(false);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Voxy pre-generation started"), false);
+                            return 0;
+                        }));
+
         return Commands.literal("voxy")
                 .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
                 .then(debug)
-                .then(overlay);
+                .then(overlay)
+                .then(pregen);
     }
 
     private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {

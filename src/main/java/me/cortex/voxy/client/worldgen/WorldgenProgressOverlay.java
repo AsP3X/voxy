@@ -49,7 +49,8 @@ public final class WorldgenProgressOverlay {
         if (mc.options.hideGui) return;
 
         ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-        boolean localRunning = mgr.isRunning();
+        boolean localRunning  = mgr.isRunning();
+        boolean userPaused    = localRunning && mgr.isUserPaused();
         boolean networkActive = NetworkState.isServerConnected();
 
         // Detect new server session — reset peak so the bar starts fresh
@@ -83,6 +84,9 @@ public final class WorldgenProgressOverlay {
     }
 
     // -------------------------------------------------------------------------
+    // Stopped / paused state
+
+    // -------------------------------------------------------------------------
     // Local worldgen mode
 
     private static void renderLocal(GuiGraphics gfx, Font font, ChunkGenerationManager mgr, float partialTick) {
@@ -91,36 +95,40 @@ public final class WorldgenProgressOverlay {
 
         if (remaining > peakRemaining) peakRemaining = remaining;
 
-        boolean done = remaining <= 0 && peakRemaining > 0;
+        boolean done    = remaining <= 0 && peakRemaining > 0;
+        boolean stopped = mgr.isUserPaused();
 
-        if (done) {
+        if (done && !stopped) {
             if (completedTimestamp < 0) completedTimestamp = System.currentTimeMillis();
             renderComplete(gfx, font, stats);
             return;
         }
-        if (remaining <= 0) return; // not yet started
+        if (remaining <= 0 && !stopped) return; // not yet started
 
         completedTimestamp = -1;
         double progress = peakRemaining > 0 ? 1.0 - ((double) remaining / peakRemaining) : 0.0;
 
         long completed = stats.getCompleted() + stats.getSkipped();
         long total     = completed + remaining;
-        double cps     = stats.getChunksPerSecond();
-        int tasks      = mgr.getActiveTaskCount();
+        double cps     = stopped ? 0 : stats.getChunksPerSecond();
+        int tasks      = stopped ? 0 : mgr.getActiveTaskCount();
 
-        String titleStr = "Voxy LOD Pre-generation";
+        String titleStr = stopped ? "Voxy LOD Pre-generation \u23f8 Stopped" : "Voxy LOD Pre-generation";
         String pctStr   = String.format(Locale.ROOT, "%.1f%%", progress * 100.0);
-        String statsStr = String.format(Locale.ROOT,
-                "%,d / %,d chunks  \u00b7  %.1f c/s  \u00b7  %d tasks",
-                completed, total, cps, tasks);
+        String statsStr = stopped
+                ? String.format(Locale.ROOT, "%,d / %,d chunks  \u00b7  paused  \u00b7  /voxy pregen start", completed, total)
+                : String.format(Locale.ROOT, "%,d / %,d chunks  \u00b7  %.1f c/s  \u00b7  %d tasks", completed, total, cps, tasks);
+
+        int titleColor = stopped ? 0xFFFFCC66 : 0xFFCCEEFF;
+        int pctColor   = stopped ? 0xFFFF9900 : 0xFF00FFCC;
 
         int sw   = gfx.guiWidth();
         int panX = sw / 2 - PANEL_W / 2;
         int panY = 12;
 
-        drawBackground(gfx, panX, panY, false);
-        drawTitleRow(gfx, font, panX, panY, titleStr, pctStr, 0xFFCCEEFF, 0xFF00FFCC);
-        drawBar(gfx, panX, panY, progress, false, partialTick);
+        drawBackground(gfx, panX, panY, false, stopped);
+        drawTitleRow(gfx, font, panX, panY, titleStr, pctStr, titleColor, pctColor);
+        drawBar(gfx, panX, panY, progress, false, stopped, partialTick);
         drawStats(gfx, font, panX, panY, statsStr);
     }
 
@@ -141,7 +149,7 @@ public final class WorldgenProgressOverlay {
         int panX = sw / 2 - PANEL_W / 2;
         int panY = 12;
 
-        drawBackground(gfx, panX, panY, false);
+        drawBackground(gfx, panX, panY, false, false);
         drawTitleRow(gfx, font, panX, panY, titleStr, null, 0xFFCCEEFF, 0);
         drawAnimatedBar(gfx, panX, panY, partialTick);
         drawStats(gfx, font, panX, panY, statsStr);
@@ -168,10 +176,10 @@ public final class WorldgenProgressOverlay {
         int panY = 12;
 
         int a = (int)(alpha * 255) & 0xFF;
-        drawBackgroundAlpha(gfx, panX, panY, true, a);
+        drawBackgroundAlpha(gfx, panX, panY, true, false, a);
         if (a > 10) {
             drawTitleRow(gfx, font, panX, panY, titleStr, "Done!", applyAlpha(0xFF66FFAA, a), applyAlpha(0xFF00FF88, a));
-            drawBar(gfx, panX, panY, 1.0, true, 0);
+            drawBar(gfx, panX, panY, 1.0, true, false, 0);
             drawStats(gfx, font, panX, panY, statsStr);
         }
     }
@@ -179,18 +187,18 @@ public final class WorldgenProgressOverlay {
     // -------------------------------------------------------------------------
     // Drawing primitives
 
-    private static void drawBackground(GuiGraphics gfx, int x, int y, boolean done) {
-        drawBackgroundAlpha(gfx, x, y, done, 0xC0);
+    private static void drawBackground(GuiGraphics gfx, int x, int y, boolean done, boolean stopped) {
+        drawBackgroundAlpha(gfx, x, y, done, stopped, 0xC0);
     }
 
-    private static void drawBackgroundAlpha(GuiGraphics gfx, int x, int y, boolean done, int alpha) {
+    private static void drawBackgroundAlpha(GuiGraphics gfx, int x, int y, boolean done, boolean stopped, int alpha) {
         // Dark panel
         gfx.fill(x, y, x + PANEL_W, y + PANEL_H, (alpha << 24) | 0x060912);
         // Top 2-px accent line
-        int accentRGB = done ? 0x00FF88 : 0x00BBFF;
+        int accentRGB = done ? 0x00FF88 : stopped ? 0xFF9900 : 0x00BBFF;
         gfx.fill(x, y, x + PANEL_W, y + 2, (alpha << 24) | accentRGB);
         // Side + bottom borders
-        int borderRGB = done ? 0x006644 : 0x004466;
+        int borderRGB = done ? 0x006644 : stopped ? 0x664400 : 0x004466;
         int border = (alpha << 24) | borderRGB;
         gfx.fill(x,               y + 2,           x + 1,            y + PANEL_H, border); // left
         gfx.fill(x + PANEL_W - 1, y + 2,           x + PANEL_W,      y + PANEL_H, border); // right
@@ -209,7 +217,7 @@ public final class WorldgenProgressOverlay {
         }
     }
 
-    private static void drawBar(GuiGraphics gfx, int x, int y, double progress, boolean done, float partialTick) {
+    private static void drawBar(GuiGraphics gfx, int x, int y, double progress, boolean done, boolean stopped, float partialTick) {
         int bx = x + 4;
         int by = y + ROW_BAR;
         int bw = PANEL_W - 8;
@@ -222,15 +230,15 @@ public final class WorldgenProgressOverlay {
         if (fillW <= 0) return;
 
         // Main bar fill — vertical gradient for depth
-        int topColor = done ? 0xFF00EE88 : 0xFF0099FF;
-        int botColor = done ? 0xFF007744 : 0xFF004499;
+        int topColor = done ? 0xFF00EE88 : stopped ? 0xFFBB6600 : 0xFF0099FF;
+        int botColor = done ? 0xFF007744 : stopped ? 0xFF663300 : 0xFF004499;
         gfx.fillGradient(bx, by, bx + fillW, by + BAR_H, topColor, botColor);
 
         // Shine on top 2px
         gfx.fillGradient(bx, by, bx + fillW, by + 2, 0x55FFFFFF, 0x00FFFFFF);
 
-        // Bright leading edge (not on completed bar)
-        if (!done && fillW < bw) {
+        // Bright leading edge (not on completed or stopped bar)
+        if (!done && !stopped && fillW < bw) {
             int edgeColor = 0xA000EEFF;
             gfx.fill(bx + fillW - 1, by, bx + fillW, by + BAR_H, edgeColor);
         }

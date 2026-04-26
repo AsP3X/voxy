@@ -58,6 +58,7 @@ public final class ChunkGenerationManager {
     private final GenerationStats stats = new GenerationStats();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean configReloadScheduled = new AtomicBoolean(false);
+    private final AtomicBoolean userPaused = new AtomicBoolean(false);
     
     // components
     private final TpsMonitor tpsMonitor = new TpsMonitor();
@@ -173,7 +174,7 @@ public final class ChunkGenerationManager {
                     continue;
                 }
 
-                if (tpsMonitor.isThrottled() || pauseCheck.getAsBoolean()) {
+                if (userPaused.get() || tpsMonitor.isThrottled() || pauseCheck.getAsBoolean()) {
                     Thread.sleep(500);
                     continue;
                 }
@@ -587,6 +588,13 @@ public final class ChunkGenerationManager {
     
     public void setPauseCheck(java.util.function.BooleanSupplier check) {
         this.pauseCheck = check;
+    }
+
+    public boolean isUserPaused() { return userPaused.get(); }
+
+    public void setUserPaused(boolean paused) {
+        userPaused.set(paused);
+        Logger.info("Voxy pregen {}", paused ? "paused by user" : "resumed by user");
     }
 
     /**
