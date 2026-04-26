@@ -569,11 +569,15 @@ public final class ChunkGenerationManager {
     }
 
     public GenerationStats getStats() { return stats; }
+    public boolean isRunning() { return running.get(); }
     public int getActiveTaskCount() { return activeTaskCount.get(); }
     public int getRemainingInRadius() {
         if (currentDimensionKey == null) return 0;
         DimensionState state = dimensionStates.get(currentDimensionKey);
-        return state != null ? state.remainingInRadius.get() : 0; 
+        return state != null ? state.remainingInRadius.get() : 0;
+    }
+    public int getTotalRemaining() {
+        return dimensionStates.values().stream().mapToInt(s -> s.remainingInRadius.get()).sum();
     }
     public boolean isThrottled() { return tpsMonitor.isThrottled(); }
     public int getQueueSize() { return 0; }

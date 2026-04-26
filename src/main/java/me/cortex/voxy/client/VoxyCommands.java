@@ -7,6 +7,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.DebugUtils;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
@@ -67,11 +68,29 @@ public class VoxyCommands {
                                 .executes(ctx -> verifyTLNs(ctx, BoolArgumentType.getBool(ctx, "attemptRepair"))))
                 );
 
+        var overlay = Commands.literal("overlay")
+                .executes(ctx -> {
+                    boolean now = !WorldgenProgressOverlay.isVisible();
+                    WorldgenProgressOverlay.setVisible(now);
+                    ctx.getSource().sendSuccess(() -> Component.literal(
+                            "Voxy worldgen overlay " + (now ? "enabled" : "disabled")), false);
+                    return 0;
+                })
+                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                        .executes(ctx -> {
+                            boolean now = BoolArgumentType.getBool(ctx, "enabled");
+                            WorldgenProgressOverlay.setVisible(now);
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Voxy worldgen overlay " + (now ? "enabled" : "disabled")), false);
+                            return 0;
+                        }));
+
         return Commands.literal("voxy")
                 .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
-                .then(debug);
+                .then(debug)
+                .then(overlay);
     }
 
     private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {

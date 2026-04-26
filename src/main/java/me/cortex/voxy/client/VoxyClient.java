@@ -5,6 +5,7 @@ import me.cortex.voxy.client.core.rendering.util.SharedIndexBuffer;
 import me.cortex.voxy.client.core.util.ExpansionUtil;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.worldgen.NetworkState;
+import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;

@@ -15,6 +15,7 @@ import me.cortex.voxy.client.core.util.ExpandingObjectAllocationList;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.world.WorldEngine;
+import me.cortex.voxy.commonImpl.VoxyCommon;
 import org.lwjgl.system.MemoryUtil;
 
 import java.util.List;
@@ -30,7 +31,7 @@ import static me.cortex.voxy.common.world.WorldEngine.UPDATE_TYPE_BLOCK_BIT;
 
 
 public class NodeManager {
-    private static final boolean VERIFY_NODE_MANAGER_OPERATIONS = true;//VoxyCommon.isVerificationFlagOn("nodeManager");
+    private static final boolean VERIFY_NODE_MANAGER_OPERATIONS = VoxyCommon.isVerificationFlagOn("nodeManager");
     //Assumptions:
     // all nodes have children (i.e. all nodes have at least one child existence bit set at all times)
     // leaf nodes always contain geometry (empty geometry counts as geometry (it just doesnt take any memory to store))
@@ -1129,7 +1130,6 @@ public class NodeManager {
 
             //Check if the node is already in-flight, if it is, dont do any processing
             if (this.nodeData.isNodeRequestInFlight(nodeId)) {
-                Logger.warn("Tried processing a node that already has a request in flight: " + nodeId + " pos: " + WorldEngine.pprintPos(pos) + " ignoring");
                 return;
             }
 
