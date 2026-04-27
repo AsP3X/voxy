@@ -8,6 +8,9 @@ import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;
+import net.minecraft.commands.arguments.coordinates.Coordinates;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -66,14 +69,14 @@ public final class VoxyServerCommands {
                                     return 0;
                                 })))
                 // /voxy pregen start <dimension> <centerX> <centerZ> <radius>
+                // centerX and centerZ support ~ for the source's current position
                 .then(Commands.literal("start")
                         .then(Commands.argument("dimension", StringArgumentType.word())
                                 .suggests((ctx, sb) -> SharedSuggestionProvider.suggest(
                                         new String[]{"overworld", "the_nether", "the_end"}, sb))
-                                .then(Commands.argument("centerX", IntegerArgumentType.integer())
-                                        .then(Commands.argument("centerZ", IntegerArgumentType.integer())
-                                                .then(Commands.argument("radius", IntegerArgumentType.integer(1))
-                                                        .executes(VoxyServerCommands::startRegion))))))
+                                .then(Commands.argument("center", ColumnPosArgument.columnPos())
+                                        .then(Commands.argument("radius", IntegerArgumentType.integer(1))
+                                                .executes(VoxyServerCommands::startRegion)))))
                 // /voxy pregen stop
                 .then(Commands.literal("stop")
                         .executes(ctx -> {
@@ -151,8 +154,9 @@ public final class VoxyServerCommands {
         }
 
         String dimStr  = StringArgumentType.getString(ctx, "dimension");
-        int centerX    = IntegerArgumentType.getInteger(ctx, "centerX");
-        int centerZ    = IntegerArgumentType.getInteger(ctx, "centerZ");
+        Vec3 center    = ctx.getArgument("center", Coordinates.class).getPosition(ctx.getSource());
+        int centerX    = (int) center.x;
+        int centerZ    = (int) center.z;
         int radius     = IntegerArgumentType.getInteger(ctx, "radius");
 
         String dimLocation = dimStr.contains(":") ? dimStr : "minecraft:" + dimStr;

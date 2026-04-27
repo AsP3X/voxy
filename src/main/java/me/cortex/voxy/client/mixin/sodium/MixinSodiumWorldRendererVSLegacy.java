@@ -3,9 +3,6 @@ package me.cortex.voxy.client.mixin.sodium;
 import com.mojang.blaze3d.vertex.PoseStack;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.rendering.Viewport;
-import me.cortex.voxy.client.core.util.IrisUtil;
-import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.caffeinemc.mods.sodium.client.gl.device.CommandList;
 import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import net.minecraft.client.Minecraft;
@@ -39,12 +36,7 @@ public class MixinSodiumWorldRendererVSLegacy {
         if (renderLayer == RenderType.solid()) {
             var renderer = ((IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer).voxy$getRenderSystem();
             if (renderer != null) {
-                Viewport<?> viewport = null;
-                if (IrisUtil.irisShaderPackEnabled()) {
-                    viewport = renderer.getViewport();
-                } else {
-                    viewport = renderer.setupViewport(matrices, x, y, z);
-                }
+                Viewport<?> viewport = renderer.setupViewport(matrices, x, y, z);
                 renderer.renderOpaque(viewport);
             }
         }

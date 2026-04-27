@@ -57,15 +57,17 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
 
     @Inject(method = "beginLevelRendering", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;activeTexture(I)V", shift = At.Shift.BEFORE), remap = false)
     private void voxy$injectViewportSetup(CallbackInfo ci) {
+        // Only ensure the renderer exists here. Viewport dimensions are set up later in
+        // MixinDefaultChunkRenderer.doRender (via setupViewport) so that they are read from
+        // the GL viewport that Iris has already established for its render target, which is the
+        // same viewport that renderOpaque will capture for dims. Calling setupViewport here
+        // (before Iris sets its render-target viewport) caused viewport.width to exceed the
+        // actual render-target width, producing scaleFactor > 1 in setup_stencil_depth and
+        // incorrectly allowing Voxy to overwrite vanilla terrain across most of the screen.
         if (IrisUtil.CAPTURED_VIEWPORT_PARAMETERS != null) {
             var rendererGetter = (IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer;
-            var renderer = rendererGetter.voxy$getRenderSystem();
-            if (renderer == null && this.pipeline != null) {
+            if (rendererGetter.voxy$getRenderSystem() == null && this.pipeline != null) {
                 rendererGetter.voxy$createRenderer();
-                renderer = rendererGetter.voxy$getRenderSystem();
-            }
-            if (renderer != null) {
-                IrisUtil.CAPTURED_VIEWPORT_PARAMETERS.apply(renderer);
             }
         }
     }

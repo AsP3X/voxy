@@ -3,8 +3,6 @@ package me.cortex.voxy.client.mixin.sodium;
 import me.cortex.voxy.client.VoxyClient;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.rendering.Viewport;
-import me.cortex.voxy.client.core.util.IrisUtil;
-import me.cortex.voxy.commonImpl.VoxyCommon;
 import net.caffeinemc.mods.sodium.client.gl.device.CommandList;
 import net.caffeinemc.mods.sodium.client.gl.device.RenderDevice;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
@@ -50,12 +48,12 @@ public abstract class MixinDefaultChunkRenderer extends ShaderChunkRenderer {
         if (renderPass == DefaultTerrainRenderPasses.CUTOUT) {
             var renderer = ((IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer).voxy$getRenderSystem();
             if (renderer != null) {
-                Viewport<?> viewport = null;
-                if (IrisUtil.irisShaderPackEnabled()) {
-                    viewport = renderer.getViewport();
-                } else {
-                    viewport = renderer.setupViewport(matrices, camera.x, camera.y, camera.z);
-                }
+                // Always call setupViewport here so the GL viewport captured for dimensions is
+                // consistent with the dims read inside renderOpaque. The earlier Iris path used
+                // renderer.getViewport() which could have been set up in beginLevelRendering before
+                // Iris established its (potentially scaled) render-target viewport, causing a size
+                // mismatch that corrupted the stencil setup and the final blit extents.
+                Viewport<?> viewport = renderer.setupViewport(matrices, camera.x, camera.y, camera.z);
                 renderer.renderOpaque(viewport);
             }
         }
