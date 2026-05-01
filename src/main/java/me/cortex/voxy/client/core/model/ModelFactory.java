@@ -739,9 +739,37 @@ public class ModelFactory {
         try {
             color = blockColors.getColor(defaultState, null, BlockPos.ZERO, 0);
         } catch (Exception e) {
-            return null;
+            // A registered provider threw when given a null BlockAndTintGetter — it has a
+            // biome-dependent implementation that calls getBlockTint() without a null-check.
+            // The provider definitely exists, so return it.
+            return (state, world, pos, tintIndex) -> blockColors.getColor(state, world, pos, tintIndex);
         }
         if (color != 0 && color != -1) {
+            return (state, world, pos, tintIndex) -> blockColors.getColor(state, world, pos, tintIndex);
+        }
+        // Some providers defensively return -1 when world is null, but produce correct
+        // biome-dependent colors with a real BlockAndTintGetter. Probe with a mock getter
+        // that tracks whether getBlockTint is called, which indicates a real color provider.
+        boolean[] accessed = {false};
+        var probeGetter = new BlockAndTintGetter() {
+            @Override public float getShade(Direction direction, boolean shaded) { return 0; }
+            @Override public int getBrightness(LightLayer type, BlockPos pos) { return 0; }
+            @Override public LevelLightEngine getLightEngine() { return null; }
+            @Override public int getBlockTint(BlockPos pos, ColorResolver colorResolver) {
+                accessed[0] = true;
+                return 0;
+            }
+            @Override public @Nullable BlockEntity getBlockEntity(BlockPos pos) { return null; }
+            @Override public BlockState getBlockState(BlockPos pos) { return defaultState; }
+            @Override public FluidState getFluidState(BlockPos pos) { return defaultState.getFluidState(); }
+            @Override public int getHeight() { return 0; }
+            @Override public int getMinBuildHeight() { return 0; }
+        };
+        try {
+            blockColors.getColor(defaultState, probeGetter, BlockPos.ZERO, 0);
+            blockColors.getColor(defaultState, probeGetter, BlockPos.ZERO, 1);
+        } catch (Exception ignored) { }
+        if (accessed[0]) {
             return (state, world, pos, tintIndex) -> blockColors.getColor(state, world, pos, tintIndex);
         }
         return null;

@@ -198,6 +198,20 @@ public class VoxyRenderSystem {
         int width = dims[2];
         int height = dims[3];
 
+        // CubesWithoutBorders (CWB) inflates the OS window by 1 px to trick the Windows
+        // taskbar into hiding, which can cause the GL viewport to exceed the mainRenderTarget.
+        // For the non-Iris path the source depth texture IS the mainRenderTarget, so use
+        // its dimensions directly to keep the depth-copy scale factor at exactly 1.0.
+        // The Iris path is intentionally excluded: Iris sets its own (possibly scaled)
+        // render-target viewport at CUTOUT time, so GL_VIEWPORT is already correct there.
+        if (!IrisUtil.irisShaderPackEnabled()) {
+            var rt = Minecraft.getInstance().getMainRenderTarget();
+            if (rt.width > 0 && rt.height > 0) {
+                width = rt.width;
+                height = rt.height;
+            }
+        }
+
         {//Apply render scaling factor
             var factor = this.pipeline.getRenderScalingFactor();
             if (factor != null) {
