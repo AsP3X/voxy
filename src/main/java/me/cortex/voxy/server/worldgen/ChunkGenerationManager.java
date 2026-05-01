@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntSupplier;
 import java.util.Locale;
 
@@ -67,6 +68,9 @@ public final class ChunkGenerationManager {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean configReloadScheduled = new AtomicBoolean(false);
     private final AtomicBoolean userPaused = new AtomicBoolean(true); // starts stopped
+    private final AtomicLong totalTarget = new AtomicLong(0);
+    /** Cached sum of all {@code remainingInRadius} — updated incrementally to avoid stream overhead on every HUD frame. */
+    private final AtomicLong totalRemaining = new AtomicLong(0);
     private int syncTotalTickCounter = 0;
 
     // mode
@@ -190,6 +194,30 @@ public final class ChunkGenerationManager {
         stats.reset();
         regionGraph = null;
         clearPregenBatchStateAllDimensions();
+
+        var players = PlayerTracker.getInstance().getPlayers();
+        if (!players.isEmpty()) {
+            java.util.Map<DimensionState, Integer> maxCounts = new java.util.HashMap<>();
+            for (ServerPlayer player : players) {
+                DimensionState state = getOrSetupState((ServerLevel) player.level());
+                if (!state.loaded) {
+                    ensureDimensionLoaded(state, (ServerLevel) player.level(), ((ServerLevel) player.level()).dimension());
+                }
+                int radius = effectiveRadius(state);
+                int missing = state.distanceGraph.countMissingInRange(player.chunkPosition(), radius);
+                maxCounts.merge(state, missing, Math::max);
+            }
+            long total = 0;
+            for (int missing : maxCounts.values()) {
+                total += missing;
+            }
+            totalTarget.set(total);
+            totalRemaining.set(total);
+        } else {
+            totalTarget.set(0);
+            totalRemaining.set(0);
+        }
+
         pregenMode = PregenMode.DYNAMIC;
         userPaused.set(false);
         scheduleConfigReload();
@@ -235,6 +263,8 @@ public final class ChunkGenerationManager {
             }
         }
         regionGraph = rg;
+        totalTarget.set(missingInRegion);
+        totalRemaining.set(missingInRegion);
 
         pregenMode = PregenMode.REGION;
         userPaused.set(false);
@@ -264,6 +294,8 @@ public final class ChunkGenerationManager {
             ds.remainingInRadius.set(0);
         }
         regionGraph = null;
+        totalTarget.set(0);
+        totalRemaining.set(0);
         stats.reset();
         Logger.info("Voxy pregen stopped and task discarded (was " + prev + ")");
     }
@@ -334,6 +366,13 @@ public final class ChunkGenerationManager {
                     continue;
                 }
 
+                if (isMemoryPressureHigh()) {
+                    Logger.warn("Voxy pregen pausing briefly due to high memory pressure. "
+                            + "Waiting for GC / chunk unload to catch up.");
+                    Thread.sleep(1000);
+                    continue;
+                }
+
                 if (pregenMode == PregenMode.DYNAMIC) {
                     workerLoopDynamic();
                 } else if (pregenMode == PregenMode.REGION) {
@@ -345,7 +384,7 @@ public final class ChunkGenerationManager {
                 break;
             } catch (Exception e) {
                 Logger.error("error in worker loop", e);
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(100); } catch (InterruptedException ignored) {}
             }
         }
     }
@@ -353,7 +392,7 @@ public final class ChunkGenerationManager {
     private void workerLoopDynamic() throws InterruptedException {
         var players = new ArrayList<>(PlayerTracker.getInstance().getPlayers());
         if (players.isEmpty()) {
-            Thread.sleep(1000);
+            Thread.sleep(100);
             return;
         }
 
@@ -434,10 +473,10 @@ public final class ChunkGenerationManager {
                     }
                 });
                 // Yield briefly so the server thread can actually drain the queue
-                Thread.sleep(5);
+                Thread.sleep(1);
                 return;
             }
-            Thread.sleep(50);
+            Thread.sleep(10);
             return;
         }
 
@@ -445,14 +484,14 @@ public final class ChunkGenerationManager {
     }
 
     private void workerLoopRegion() throws InterruptedException {
-        if (server == null) { Thread.sleep(500); return; }
+        if (server == null) { Thread.sleep(100); return; }
 
         DistanceGraph rg = regionGraph;
-        if (rg == null) { Thread.sleep(500); return; }
+        if (rg == null) { Thread.sleep(100); return; }
 
         ServerLevel level = server.getLevel(regionDimension);
         if (level == null) {
-            Thread.sleep(1000);
+            Thread.sleep(100);
             return;
         }
 
@@ -466,7 +505,7 @@ public final class ChunkGenerationManager {
                 regionMinCx, regionMinCz, regionMaxCx, regionMaxCz, ds.trackedBatches);
 
         if (batch == null) {
-            Thread.sleep(100);
+            Thread.sleep(10);
             return;
         }
 
@@ -509,7 +548,7 @@ public final class ChunkGenerationManager {
             return;
         }
 
-        List<ChunkPos> readyToGenerate = new ArrayList<>();
+        List<ChunkPos> readyToGenerate = new ArrayList<>(preFiltered.size());
         int processedCount = 0;
         for (ChunkPos pos : preFiltered) {
             if (!workerRunning.get()) break;
@@ -550,7 +589,7 @@ public final class ChunkGenerationManager {
         if (!readyToGenerate.isEmpty()) {
             server.execute(() -> {
                 ServerChunkCache cache = finalState.level.getChunkSource();
-                List<ChunkPos> actuallyGenerate = new ArrayList<>();
+                List<ChunkPos> actuallyGenerate = new ArrayList<>(readyToGenerate.size());
 
                 for (ChunkPos pos : readyToGenerate) {
                     if (finalState.level.hasChunk(pos.x, pos.z)) {
@@ -573,17 +612,22 @@ public final class ChunkGenerationManager {
                         ((ServerChunkCacheInvoker) cache)
                                 .invokeGetChunkFutureMainThread(pos.x, pos.z, ChunkStatus.FULL, true)
                                 .whenCompleteAsync((result, throwable) -> {
-                                    if (throwable == null && result != null && result.isSuccess()
-                                            && result.orElse(null) instanceof LevelChunk chunk) {
-                                        onSuccess(finalState, pos);
-                                        if (chunkHasRenderableData(chunk)) {
-                                            WorldGenVoxyHooks.ingestChunk(chunk);
-                                            VoxyWorldGenNetworking.broadcastLODData(chunk);
+                                    try {
+                                        if (throwable == null && result != null && result.isSuccess()
+                                                && result.orElse(null) instanceof LevelChunk chunk) {
+                                            onSuccess(finalState, pos);
+                                            if (chunkHasRenderableData(chunk)) {
+                                                WorldGenVoxyHooks.ingestChunk(chunk);
+                                                VoxyWorldGenNetworking.broadcastLODData(chunk);
+                                            }
+                                        } else {
+                                            onFailure(finalState, pos);
                                         }
-                                    } else {
-                                        onFailure(finalState, pos);
+                                        cleanupTask(finalState.level, pos);
+                                    } catch (Exception e) {
+                                        Logger.error("Exception in chunk generation callback for " + pos, e);
+                                        cleanupTask(finalState.level, pos);
                                     }
-                                    cleanupTask(finalState.level, pos);
                                 }, server);
                     }
                 }
@@ -706,6 +750,12 @@ public final class ChunkGenerationManager {
                 maxCounts.merge(state, missing, Math::max);
             }
             maxCounts.forEach((state, count) -> state.remainingInRadius.set(count));
+            long total = 0;
+            for (int missing : maxCounts.values()) {
+                total += missing;
+            }
+            totalTarget.set(total);
+            totalRemaining.set(total);
         } else if (pregenMode == PregenMode.REGION && server != null) {
             DistanceGraph rg = regionGraph;
             ServerLevel level = server.getLevel(regionDimension);
@@ -719,6 +769,50 @@ public final class ChunkGenerationManager {
 
     // -------------------------------------------------------------------------
     // Internals
+
+    /**
+     * Returns true only when the JVM is genuinely running out of heap room.
+     * A simple percentage of max memory falsely triggers on modded Minecraft
+     * because the JVM commits a large heap early and freeMemory fluctuates
+     * wildly depending on when the last GC ran.
+     *
+     * We only report pressure when BOTH are true:
+     * 1. The heap is nearly fully expanded (totalMemory >= 90% of maxMemory)
+     * 2. The committed heap itself is critically low on free space (< 5% free)
+     *
+     * When pressure is detected we hint a GC and recheck once, because the
+     * low reading is often just a temporarily fragmented heap before a collection.
+     */
+    private boolean isMemoryPressureHigh() {
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+
+        // Phase 1: if the heap hasn't expanded much yet, the JVM still has
+        // headroom to grow totalMemory without GC pressure — don't throttle.
+        if (totalMemory < maxMemory * 9L / 10L) {
+            return false;
+        }
+
+        // Phase 2: heap is expanded; check if committed space is critically low.
+        // < 5% free inside the committed heap means GC is struggling to find room.
+        if (freeMemory >= totalMemory / 20L) {
+            return false;
+        }
+
+        // Phase 3: pressure detected — nudge GC and recheck to avoid false
+        // positives from a heap that just hasn't collected yet.
+        System.gc();
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        totalMemory = runtime.totalMemory();
+        freeMemory = runtime.freeMemory();
+        return totalMemory >= maxMemory * 9L / 10L && freeMemory < totalMemory / 20L;
+    }
 
     private void updateThrottleCapacity() {
         int target = VoxyWorldGenConfig.DATA.maxActiveTasks;
@@ -767,6 +861,7 @@ public final class ChunkGenerationManager {
             DistanceGraph rg = regionGraph;
             if (rg != null) rg.markChunkCompleted(pos.x, pos.z);
             state.remainingInRadius.updateAndGet(v -> Math.max(0, v - 1));
+            totalRemaining.updateAndGet(v -> Math.max(0, v - 1));
         } else {
             stats.incrementSkipped();
             state.distanceGraph.markChunkCompleted(pos.x, pos.z);
@@ -779,6 +874,7 @@ public final class ChunkGenerationManager {
     private void onFailure(DimensionState state, ChunkPos pos) {
         stats.incrementFailed();
         state.remainingInRadius.updateAndGet(v -> Math.max(0, v - 1));
+        totalRemaining.updateAndGet(v -> Math.max(0, v - 1));
         decrementBatch(state, pos);
     }
 
@@ -826,8 +922,12 @@ public final class ChunkGenerationManager {
         return state != null ? state.remainingInRadius.get() : 0;
     }
 
-    public int getTotalRemaining() {
-        return dimensionStates.values().stream().mapToInt(s -> s.remainingInRadius.get()).sum();
+    public long getTotalRemaining() {
+        return totalRemaining.get();
+    }
+
+    public long getTotalTarget() {
+        return totalTarget.get();
     }
 
     public boolean isThrottled() { return tpsMonitor.isThrottled(); }

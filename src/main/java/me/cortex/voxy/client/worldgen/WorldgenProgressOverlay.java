@@ -27,12 +27,17 @@ public final class WorldgenProgressOverlay {
     private static boolean progressVisible = true;
     /** Server LOD sync panel; disabled by default, enable via /voxy overlay sync enabled. */
     private static boolean syncVisible = false;
+    /** Memory-pressure dot inside the progress overlay; enabled by default. */
+    private static boolean memoryPressureVisible = true;
 
     public static boolean isProgressVisible() { return progressVisible; }
     public static void setProgressVisible(boolean v) { progressVisible = v; }
 
     public static boolean isSyncVisible() { return syncVisible; }
     public static void setSyncVisible(boolean v) { syncVisible = v; }
+
+    public static boolean isMemoryPressureVisible() { return memoryPressureVisible; }
+    public static void setMemoryPressureVisible(boolean v) { memoryPressureVisible = v; }
 
     // State tracking across frames
     private static boolean wasRunning = false;
@@ -88,7 +93,7 @@ public final class WorldgenProgressOverlay {
     private static void renderLocal(GuiGraphics gfx, Font font, ChunkGenerationManager mgr,
                                     ChunkGenerationManager.PregenMode mode, float partialTick) {
         GenerationStats stats = mgr.getStats();
-        int remaining = mgr.getTotalRemaining();
+        long remaining = mgr.getTotalRemaining();
         boolean paused = mgr.isUserPaused();
 
         if (remaining > peakRemaining) peakRemaining = remaining;
@@ -96,8 +101,8 @@ public final class WorldgenProgressOverlay {
         if (remaining <= 0 && !paused) return; // not yet started
         double progress = peakRemaining > 0 ? 1.0 - ((double) remaining / peakRemaining) : 0.0;
 
-        long completed  = stats.getCompleted() + stats.getSkipped();
-        long total      = completed + remaining;
+        long total      = mgr.getTotalTarget();
+        long completed  = Math.max(0, total - remaining);
         double cps      = paused ? 0 : stats.getChunksPerSecond();
         int tasks       = paused ? 0 : mgr.getActiveTaskCount();
 
@@ -127,6 +132,7 @@ public final class WorldgenProgressOverlay {
         drawTitleRow(gfx, font, panX, panY, titleStr, pctStr, titleColor, pctColor);
         drawBar(gfx, panX, panY, progress, paused, isRegion, partialTick);
         drawStats(gfx, font, panX, panY, statsStr);
+        drawMemoryPressureDot(gfx, panX, panY);
     }
 
     // -------------------------------------------------------------------------
@@ -245,6 +251,43 @@ public final class WorldgenProgressOverlay {
         int sw = font.width(statsStr);
         int cx = x + PANEL_W / 2;
         gfx.drawString(font, statsStr, cx - sw / 2, y + ROW_STATS, 0xFF7A8899, false);
+    }
+
+    // -------------------------------------------------------------------------
+    // Memory-pressure dot
+
+    /** Returns the ARGB color for the memory-pressure dot, or 0 if the dot should not be drawn. */
+    private static int memoryPressureDotColor() {
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+
+        // Heap not yet expanded much — plenty of headroom for GC to grow
+        if (totalMemory < maxMemory * 9L / 10L) {
+            long used = totalMemory - freeMemory;
+            double ratio = (double) used / totalMemory;
+            if (ratio < 0.70) return 0xFF00FF00; // green
+            if (ratio < 0.85) return 0xFFFFFF00; // yellow
+            return 0xFFFF0000;                 // red
+        }
+
+        // Heap is expanded; look at committed-space pressure
+        long used = totalMemory - freeMemory;
+        double ratio = (double) used / totalMemory;
+        if (ratio < 0.75) return 0xFF00FF00; // green
+        if (ratio < 0.88) return 0xFFFFFF00; // yellow
+        return 0xFFFF0000;                 // red
+    }
+
+    private static void drawMemoryPressureDot(GuiGraphics gfx, int x, int y) {
+        if (!memoryPressureVisible) return;
+        int color = memoryPressureDotColor();
+        if (color == 0) return;
+        int size = 5;
+        int dx = x + PANEL_W - 10 - size;
+        int dy = y + ROW_STATS + 1;
+        gfx.fill(dx, dy, dx + size, dy + size, color);
     }
 
 }

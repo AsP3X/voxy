@@ -135,10 +135,17 @@ public class ServiceManager {
         this.isShutdown = true;
         while (this.services.length != 0) {
             Thread.yield();
+            Service[] snapshot;
             synchronized (this) {
-                for (var s : this.services) {
-                    if (s.isLive()) {
-                        throw new IllegalStateException("Service '" + s.name + "' was not in shutdown when manager shutdown");
+                snapshot = this.services.clone();
+            }
+            for (var s : snapshot) {
+                if (s.isLive()) {
+                    try {
+                        s.shutdown();
+                    } catch (IllegalStateException e) {
+                        // Already shutting down — race with another caller
+                        Logger.error("Service '" + s.name + "' shutdown race: " + e.getMessage());
                     }
                 }
             }

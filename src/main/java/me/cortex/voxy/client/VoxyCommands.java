@@ -90,7 +90,22 @@ public class VoxyCommands {
                                     ctx.getSource().sendSuccess(() -> Component.literal(
                                             "Voxy worldgen progress overlay disabled"), false);
                                     return 0;
-                                })))
+                                }))
+                        .then(Commands.literal("memory_pressure_indicator")
+                                .then(Commands.literal("enabled")
+                                        .executes(ctx -> {
+                                            WorldgenProgressOverlay.setMemoryPressureVisible(true);
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "Voxy memory pressure indicator enabled"), false);
+                                            return 0;
+                                        }))
+                                .then(Commands.literal("disabled")
+                                        .executes(ctx -> {
+                                            WorldgenProgressOverlay.setMemoryPressureVisible(false);
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "Voxy memory pressure indicator disabled"), false);
+                                            return 0;
+                                        }))))
                 .then(Commands.literal("server_sync")
                         .then(Commands.literal("enabled")
                                 .executes(ctx -> {

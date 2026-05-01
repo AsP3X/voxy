@@ -2,6 +2,7 @@ package me.cortex.voxy.server.worldgen;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.VoxyMod;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
@@ -229,7 +230,7 @@ public final class VoxyWorldGenNetworking {
                     + (sd.skyLight() != null ? sd.skyLight().length : 0);
 
             if (!batch.isEmpty() && batchBytes + sectionBytes > MAX_PACKET_BYTES) {
-                PacketDistributor.sendToPlayer(player, new LodColumnPayload(dimension, pos, minY, batch));
+                safeSendToPlayer(player, new LodColumnPayload(dimension, pos, minY, batch));
                 batch = new ArrayList<>();
                 batchBytes = 0;
             }
@@ -239,12 +240,12 @@ public final class VoxyWorldGenNetworking {
         }
 
         if (!batch.isEmpty()) {
-            PacketDistributor.sendToPlayer(player, new LodColumnPayload(dimension, pos, minY, batch));
+            safeSendToPlayer(player, new LodColumnPayload(dimension, pos, minY, batch));
         }
     }
 
     public static void sendHandshake(ServerPlayer player) {
-        PacketDistributor.sendToPlayer(player, new HandshakePayload(true));
+        safeSendToPlayer(player, new HandshakePayload(true));
     }
 
     /**
@@ -258,6 +259,14 @@ public final class VoxyWorldGenNetworking {
         ServerLevel level = (ServerLevel) player.level();
         long total = mgr.computeSyncTotal(level, player.chunkPosition());
         // Always send — even 0 so the client knows no data is available yet.
-        PacketDistributor.sendToPlayer(player, new SyncTotalPayload(total));
+        safeSendToPlayer(player, new SyncTotalPayload(total));
+    }
+
+    private static void safeSendToPlayer(ServerPlayer player, CustomPacketPayload payload) {
+        try {
+            PacketDistributor.sendToPlayer(player, payload);
+        } catch (Exception e) {
+            Logger.error("Failed to send packet " + payload.type().id() + " to player " + player.getName().getString(), e);
+        }
     }
 }
