@@ -262,7 +262,7 @@ public final class VoxyWorldGenNetworking {
         safeSendToPlayer(player, new SyncTotalPayload(total));
     }
 
-    private static void safeSendToPlayer(ServerPlayer player, CustomPacketPayload payload) {
+    static void safeSendToPlayer(ServerPlayer player, CustomPacketPayload payload) {
         try {
             PacketDistributor.sendToPlayer(player, payload);
         } catch (Exception e) {
