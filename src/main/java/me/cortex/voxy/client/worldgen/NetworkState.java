@@ -26,6 +26,7 @@ public final class NetworkState {
             lastUpdateTime = 0;
             lastChunkCount = 0;
             lastByteCount = 0;
+            ServerProgressState.reset();
         }
     }
 
