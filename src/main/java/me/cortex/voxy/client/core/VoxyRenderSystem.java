@@ -548,7 +548,10 @@ public class VoxyRenderSystem {
         Logger.info("Shutting down render pipeline");
         try {this.pipeline.free();} catch (Exception e){Logger.error("Error releasing render pipeline", e);}
 
-
+        if (this.gpuFence != 0) {
+            glDeleteSync(this.gpuFence);
+            this.gpuFence = 0;
+        }
 
         Logger.info("Flushing download stream");
         DownloadStream.INSTANCE.flushWaitClear();
