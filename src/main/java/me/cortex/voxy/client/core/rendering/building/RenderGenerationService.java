@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 // and process accordingly
 public class RenderGenerationService {
     private static final int MAX_HOLDING_SECTION_COUNT = 1000;
+    private static final int MAX_QUEUE_SIZE = 10000;
 
     public static final AtomicInteger MESH_FAILED_COUNTER = new AtomicInteger();
     private static final AtomicInteger COUNTER = new AtomicInteger();
@@ -291,6 +292,13 @@ public class RenderGenerationService {
         if (isOurs[0]) {//If its not ours we dont care about it
             //Set priority and insert into queue and execute
             task.updatePriority();
+            if (this.taskQueueCount.get() >= MAX_QUEUE_SIZE) {
+                //Queue is full, remove the task from the map so it can be retried later
+                long stamp2 = this.taskMapLock.writeLock();
+                this.taskMap.remove(task.position);
+                this.taskMapLock.unlockWrite(stamp2);
+                return;
+            }
             this.taskQueue.add(task);
             this.taskQueueCount.incrementAndGet();
             this.service.execute();

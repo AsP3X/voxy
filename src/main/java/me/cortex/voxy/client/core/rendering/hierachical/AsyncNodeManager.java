@@ -198,12 +198,9 @@ public class AsyncNodeManager {
             if (this.workCounter.get() <= 0 || !this.running) {//No work
                 return;
             }
-            //This is a funny thing, wait a bit, this allows for better batching, but this thread is independent of everything else so waiting a bit should be mostly ok
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
+            //Yield briefly instead of sleeping to improve latency without
+            //sacrificing batching (loops already cap at 300 items per queue).
+            LockSupport.parkNanos(100_000);
         }
 
         if (!this.running) {
@@ -248,14 +245,14 @@ public class AsyncNodeManager {
             workDone += work;
         }
 
-        do {
+        for (int limit = 0; limit < 300; limit++) {
             var job = this.childUpdateQueue.poll();
             if (job == null)
                 break;
             workDone++;
             this.manager.processChildChange(job.key, job.getNonEmptyChildren());
             job.release();
-        } while (true);
+        }
 
 
         //Limit uploading as well as by geometry capacity being available
@@ -274,7 +271,7 @@ public class AsyncNodeManager {
             }
         }
 
-        while (true) {//Process all request batches
+        for (int limit = 0; limit < 300; limit++) {//Process request batches
             var job = this.requestBatchQueue.poll();
             if (job == null)
                 break;
@@ -294,7 +291,7 @@ public class AsyncNodeManager {
         }
 
 
-        do {
+        for (int limit = 0; limit < 300; limit++) {
             var job = this.removeBatchQueue.poll();
             if (job == null)
                 break;
@@ -318,7 +315,7 @@ public class AsyncNodeManager {
                 this.manager.removeNodeGeometry(pos);
             }
             job.free();
-        } while (true);
+        }
 
         if (this.workCounter.addAndGet(-workDone) < 0) {
             try {

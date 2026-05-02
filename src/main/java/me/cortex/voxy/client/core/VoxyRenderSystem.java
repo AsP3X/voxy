@@ -277,7 +277,10 @@ public class VoxyRenderSystem {
         //Sodium dropping a section mesh and Voxy showing far geometry (or the reverse when approaching).
         {
             UploadStream.INSTANCE.tick();
-            while (this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) && VoxyClient.isFrexActive()) {
+            for (int frexLimit = 0; frexLimit < 20; frexLimit++) {
+                if (!this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) || !VoxyClient.isFrexActive()) {
+                    break;
+                }
                 // Frex: drain the ring queue in one pass so the world state is consistent before render.
             }
             TimingStatistics.H.start();
