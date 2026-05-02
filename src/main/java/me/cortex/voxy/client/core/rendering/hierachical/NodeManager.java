@@ -19,6 +19,7 @@ import me.cortex.voxy.commonImpl.VoxyCommon;
 import org.lwjgl.system.MemoryUtil;
 
 import java.util.List;
+import java.util.Arrays;
 
 import static me.cortex.voxy.common.world.WorldEngine.MAX_LOD_LAYER;
 import static me.cortex.voxy.common.world.WorldEngine.UPDATE_TYPE_BLOCK_BIT;
@@ -1346,12 +1347,31 @@ public class NodeManager {
 
     //==================================================================================================================
     public boolean writeChanges(GlBuffer nodeBuffer) {
-        //TODO: use like compute based copy system or something
-        // since microcopies are bad
         if (this.nodeUpdates.isEmpty()) {
             return false;
         }
-        this.nodeUpdates.forEach((int i) -> this.nodeData.writeNode(UploadStream.INSTANCE.upload(nodeBuffer, i*16L, 16L), i));
+
+        int[] ids = this.nodeUpdates.toIntArray();
+        Arrays.sort(ids);
+
+        int i = 0;
+        while (i < ids.length) {
+            int rangeStart = ids[i];
+            int rangeEnd = rangeStart;
+            while (i + 1 < ids.length && ids[i + 1] == rangeEnd + 1) {
+                rangeEnd++;
+                i++;
+            }
+            int count = rangeEnd - rangeStart + 1;
+            long size = count * 16L;
+
+            long ptr = UploadStream.INSTANCE.upload(nodeBuffer, rangeStart * 16L, size);
+            this.nodeData.writeNodeRange(ptr, rangeStart, count);
+
+            i++;
+        }
+
+        UploadStream.INSTANCE.commit();
         this.nodeUpdates.clear();
         return true;
     }
