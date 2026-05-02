@@ -44,7 +44,6 @@ import java.util.List;
 
 import static org.lwjgl.opengl.GL11.GL_VIEWPORT;
 import static org.lwjgl.opengl.GL11.glEnable;
-import static org.lwjgl.opengl.GL11.glFinish;
 import static org.lwjgl.opengl.GL11.glGetIntegerv;
 import static org.lwjgl.opengl.GL11.glViewport;
 import static org.lwjgl.opengl.GL32.GL_ALREADY_SIGNALED;
@@ -458,12 +457,34 @@ public class VoxyRenderSystem {
         if (!VoxyClient.isFrexActive()) {
             return false;
         }
+
+        // Poll existing fence non-blockingly
+        if (this.gpuFence != 0) {
+            int ret = glClientWaitSync(this.gpuFence, 0, 0);
+            if (ret == GL_ALREADY_SIGNALED || ret == GL_CONDITION_SATISFIED) {
+                glDeleteSync(this.gpuFence);
+                this.gpuFence = 0;
+            } else if (ret < 0) {
+                // GL_WAIT_FAILED or other error
+                Logger.error("glClientWaitSync failed with " + ret + ", discarding fence");
+                glDeleteSync(this.gpuFence);
+                this.gpuFence = 0;
+            }
+        }
+
         //If frex is running we must tick everything to ensure correctness
         UploadStream.INSTANCE.tick();
         //Done here as is allows less gl state resetup
         this.modelService.tick(100_000_000);
-        GL11.glFinish();
-        return this.nodeManager.hasWork() || this.renderGen.getTaskCount()!=0 || !this.modelService.areQueuesEmpty();
+
+        boolean stillHasWork = this.nodeManager.hasWork() || this.renderGen.getTaskCount()!=0 || !this.modelService.areQueuesEmpty();
+        if (stillHasWork && this.gpuFence == 0) {
+            this.gpuFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (this.gpuFence == 0) {
+                Logger.warn("glFenceSync returned 0, proceeding without GPU fence");
+            }
+        }
+        return stillHasWork;
     }
 
     public void setRenderDistance(float renderDistance) {
