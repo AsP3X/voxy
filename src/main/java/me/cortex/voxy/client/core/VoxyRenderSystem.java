@@ -47,6 +47,12 @@ import static org.lwjgl.opengl.GL11.glEnable;
 import static org.lwjgl.opengl.GL11.glFinish;
 import static org.lwjgl.opengl.GL11.glGetIntegerv;
 import static org.lwjgl.opengl.GL11.glViewport;
+import static org.lwjgl.opengl.GL32.GL_ALREADY_SIGNALED;
+import static org.lwjgl.opengl.GL32.GL_CONDITION_SATISFIED;
+import static org.lwjgl.opengl.GL32.GL_SYNC_GPU_COMMANDS_COMPLETE;
+import static org.lwjgl.opengl.GL32.glClientWaitSync;
+import static org.lwjgl.opengl.GL32.glDeleteSync;
+import static org.lwjgl.opengl.GL32.glFenceSync;
 import static org.lwjgl.opengl.GL11C.*;
 import static org.lwjgl.opengl.GL20C.glUseProgram;
 import static org.lwjgl.opengl.GL30.glGetIntegeri;
@@ -73,6 +79,7 @@ public class VoxyRenderSystem {
     private final ViewportSelector<?> viewportSelector;
 
     private final AbstractRenderPipeline pipeline;
+    private long gpuFence;
 
     private static AbstractSectionRenderer.Factory<?,? extends IGeometryData> getRenderBackendFactory() {
         //TODO: need todo a thing where selects optimal section render based on if supports the pipeline and geometry data type
