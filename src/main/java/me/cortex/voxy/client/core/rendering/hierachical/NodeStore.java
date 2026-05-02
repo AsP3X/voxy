@@ -305,6 +305,12 @@ public final class NodeStore {
         MemoryUtil.memPutInt(ptr, w); ptr += 4;
     }
 
+    public void writeNodeRange(long ptr, int startId, int count) {
+        for (int i = 0; i < count; i++) {
+            this.writeNode(ptr + i * 16L, startId + i);
+        }
+    }
+
     public int getEndNodeId() {
         return this.allocationSet.getMaxIndex();
     }
