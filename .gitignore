@@ -13,3 +13,5 @@ bin/
 .settings/
 
 .vscode/.worktrees/
+.worktrees/
+.claude/
