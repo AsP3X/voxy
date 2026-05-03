@@ -1,6 +1,7 @@
 package me.cortex.voxy.server.worldgen;
 
 import me.cortex.voxy.client.worldgen.VoxyWorldGenClientReceiver;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
@@ -26,6 +27,14 @@ public final class VoxyWorldGenBootstrap {
                 ServerPregenProgressPayload.TYPE,
                 ServerPregenProgressPayload.STREAM_CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> VoxyWorldGenClientReceiver.onPregenProgress(payload)));
+        reg.playToServer(
+                VoxyWorldGenNetworking.ClientRequestResyncPayload.TYPE,
+                VoxyWorldGenNetworking.ClientRequestResyncPayload.STREAM_CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player) {
+                        VoxyWorldGenNetworking.handleClientResyncRequest(player);
+                    }
+                }));
     }
 
     public static void init(IEventBus modEventBus) {
