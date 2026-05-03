@@ -104,6 +104,10 @@ public final class VoxyServerLifecycle {
         ChunkPos pos   = chunk.getPos();
         int minY       = chunk.getMinSection();
         var dim        = level.dimension();
+
+        // Cache for full-sync replay to new players
+        ServerLodPayloadStore.getInstance().storeColumn(dim, pos, minY, sections);
+
         for (ServerPlayer player : targets) {
             VoxyWorldGenNetworking.sendLODDataPrebuilt(player, dim, pos, minY, sections);
         }

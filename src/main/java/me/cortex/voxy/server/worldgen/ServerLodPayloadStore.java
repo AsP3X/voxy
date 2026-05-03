@@ -2,7 +2,6 @@ package me.cortex.voxy.server.worldgen;
 
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
@@ -94,9 +93,14 @@ public final class ServerLodPayloadStore {
         if (player == null) return;
         if (!player.level().dimension().equals(dim)) return;
 
+        var synced = PlayerTracker.getInstance().getSyncedChunks(playerId);
         int end = Math.min(offset + BATCH_SIZE, payloads.size());
         for (int i = offset; i < end; i++) {
-            VoxyWorldGenNetworking.safeSendToPlayer(player, payloads.get(i));
+            var payload = payloads.get(i);
+            VoxyWorldGenNetworking.safeSendToPlayer(player, payload);
+            if (synced != null) {
+                synced.add(payload.pos().toLong());
+            }
         }
 
         if (end < payloads.size()) {
@@ -113,14 +117,15 @@ public final class ServerLodPayloadStore {
         Path path = getStorePath(level);
         if (path == null) return;
 
+        // Snapshot to avoid concurrent-modification mismatch between count and entries
+        var snapshot = new ArrayList<>(dimCache.values());
+
         try {
             Files.createDirectories(path.getParent());
             try (DataOutputStream out = new DataOutputStream(
                     new BufferedOutputStream(Files.newOutputStream(path)))) {
                 out.writeInt(MAGIC);
                 out.writeInt(VERSION);
-                // Snapshot to avoid concurrent-modification mismatch between count and entries
-                var snapshot = new ArrayList<>(dimCache.values());
                 out.writeInt(snapshot.size());
                 for (var payload : snapshot) {
                     ByteBuf raw = Unpooled.buffer();
@@ -142,7 +147,7 @@ public final class ServerLodPayloadStore {
                     }
                 }
             }
-            Logger.info("Saved " + dimCache.size() + " LOD columns to " + path);
+            Logger.info("Saved " + snapshot.size() + " LOD columns to " + path);
         } catch (Exception e) {
             Logger.error("Failed to save LOD payload store for " + dim, e);
         }
