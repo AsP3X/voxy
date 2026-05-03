@@ -68,7 +68,7 @@ public final class VoxyServerLifecycle {
                 player.getServer().getTickCount() + 20,
                 () -> {
                     VoxyWorldGenNetworking.sendSyncTotal(player);
-                    ChunkGenerationManager.getInstance().scheduleJoinLodResync(player.getUUID());
+                    ServerLodPayloadStore.getInstance().scheduleFullSync(player);
                 }));
     }
 
