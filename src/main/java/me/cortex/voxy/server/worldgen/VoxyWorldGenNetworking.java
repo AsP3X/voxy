@@ -284,4 +284,16 @@ public final class VoxyWorldGenNetworking {
             Logger.error("Failed to send packet " + payload.type().id() + " to player " + player.getName().getString(), e);
         }
     }
+
+    public static void handleClientResyncRequest(ServerPlayer player) {
+        ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+        if (!mgr.isRunning()) {
+            return;
+        }
+        var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
+        if (synced != null) {
+            synced.clear();
+        }
+        mgr.scheduleJoinLodResync(player.getUUID());
+    }
 }
