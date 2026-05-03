@@ -145,6 +145,9 @@ public final class VoxyWorldGenNetworking {
         double maxDistSq = 4096.0 * 4096.0;
         ResourceKey<Level> dim = chunk.getLevel().dimension();
 
+        // Store for full-sync replay to new players
+        ServerLodPayloadStore.getInstance().storeColumn(dim, pos, minY, sections);
+
         for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
             double dx = player.getX() - pos.getMiddleBlockX();
             double dz = player.getZ() - pos.getMiddleBlockZ();
@@ -166,6 +169,8 @@ public final class VoxyWorldGenNetworking {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSection();
         List<LodSectionPayload> sections = buildSections(chunk);
+        // Store for full-sync replay
+        ServerLodPayloadStore.getInstance().storeColumn(chunk.getLevel().dimension(), pos, minY, sections);
         if (sections.isEmpty()) { setSyncedState(player, pos, false); return; }
         sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
         setSyncedState(player, pos, true);
