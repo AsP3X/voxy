@@ -4,6 +4,7 @@ import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import me.cortex.voxy.server.worldgen.PlayerTracker;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenConfig;
+import me.cortex.voxy.server.worldgen.ServerLodPayloadStore;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -47,6 +48,10 @@ public final class VoxyServerLifecycle {
     private static void onServerStopping(ServerStoppingEvent event) {
         ChunkGenerationManager.getInstance().shutdown();
         PlayerTracker.getInstance().clear();
+        // Save all persisted LOD payloads before shutdown
+        for (ServerLevel level : event.getServer().getAllLevels()) {
+            ServerLodPayloadStore.getInstance().save(level);
+        }
         if (VoxyCommon.IS_DEDICATED_SERVER) {
             VoxyCommon.shutdownInstance();
             VoxyDedicatedServerInstance.unbindServer();

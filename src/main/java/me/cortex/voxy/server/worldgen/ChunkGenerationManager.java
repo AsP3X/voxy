@@ -525,6 +525,8 @@ public final class ChunkGenerationManager {
             }
         }
         state.loaded = true;
+        // Load persisted LOD payloads for this dimension
+        ServerLodPayloadStore.getInstance().load(level);
     }
 
     private void dispatchBatch(DimensionState finalState, List<ChunkPos> batch) throws InterruptedException {
