@@ -25,6 +25,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.ArrayList;
 import java.util.List;
 
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.PlayerTracker;
+
 public final class VoxyWorldGenNetworking {
     // 256 KB per LodColumn payload — reduces packet count by ~8× vs 32 KB
     private static final int MAX_PACKET_BYTES = 262_144;
@@ -117,6 +120,18 @@ public final class VoxyWorldGenNetworking {
 
         @Override
         public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record ClientRequestResyncPayload() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ClientRequestResyncPayload> TYPE =
+                new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "client_request_resync"));
+        public static final StreamCodec<FriendlyByteBuf, ClientRequestResyncPayload> STREAM_CODEC =
+                StreamCodec.of((b, v) -> {}, b -> new ClientRequestResyncPayload());
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
     }
 
     private VoxyWorldGenNetworking() {}
