@@ -16,6 +16,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 
+import me.cortex.voxy.server.worldgen.PlayerTracker;
+import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.server.level.ServerPlayer;
+
 /**
  * Server-side /voxy commands registered via RegisterCommandsEvent.
  * These run on the server thread and are safe to execute on both dedicated
@@ -29,7 +33,7 @@ public final class VoxyServerCommands {
 
     public static LiteralArgumentBuilder<CommandSourceStack> register() {
         return Commands.literal("voxy")
-                .requires(src -> src.hasPermission(2))
+                .requires(src -> src.hasPermission(Commands.LEVEL_GAMEMASTERS))
                 .then(buildPregen());
     }
 
@@ -143,7 +147,12 @@ public final class VoxyServerCommands {
                             ctx.getSource().sendSuccess(() -> Component.literal(
                                     "Voxy pre-generation resumed"), true);
                             return 0;
-                        }));
+                        }))
+                // /voxy pregen resync [player]
+                .then(Commands.literal("resync")
+                        .executes(VoxyServerCommands::resyncSelf)
+                        .then(Commands.argument("player", EntityArgument.player())
+                                .executes(VoxyServerCommands::resyncTarget)));
     }
 
     private static int startRegion(CommandContext<CommandSourceStack> ctx) {
@@ -173,6 +182,44 @@ public final class VoxyServerCommands {
         ctx.getSource().sendSuccess(() -> Component.literal(String.format(
                 "Voxy pre-generation started: %s [%d,%d] radius %d blocks",
                 dimStr, centerX, centerZ, radius)), true);
+        return 0;
+    }
+
+    private static int resyncSelf(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer self = ctx.getSource().getPlayer();
+        if (self == null) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "This command must be run by a player, or specify a target player"));
+            return 1;
+        }
+        return doResync(ctx, self);
+    }
+
+    private static int resyncTarget(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer target;
+        try {
+            target = EntityArgument.getPlayer(ctx, "player");
+        } catch (Exception e) {
+            ctx.getSource().sendFailure(Component.literal("Invalid target player"));
+            return 1;
+        }
+        return doResync(ctx, target);
+    }
+
+    private static int doResync(CommandContext<CommandSourceStack> ctx, ServerPlayer target) {
+        ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
+        if (!mgr.isRunning()) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "Voxy worldgen is not active on this server"));
+            return 1;
+        }
+        var synced = PlayerTracker.getInstance().getSyncedChunks(target.getUUID());
+        if (synced != null) {
+            synced.clear();
+        }
+        mgr.scheduleJoinLodResync(target.getUUID());
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;
     }
 }
