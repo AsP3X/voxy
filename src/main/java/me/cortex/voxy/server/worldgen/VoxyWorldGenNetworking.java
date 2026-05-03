@@ -299,6 +299,6 @@ public final class VoxyWorldGenNetworking {
         if (synced != null) {
             synced.clear();
         }
-        mgr.scheduleJoinLodResync(player.getUUID());
+        ServerLodPayloadStore.getInstance().scheduleFullSync(player);
     }
 }

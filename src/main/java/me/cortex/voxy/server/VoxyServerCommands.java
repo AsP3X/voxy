@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.ServerLodPayloadStore;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -217,7 +218,7 @@ public final class VoxyServerCommands {
         if (synced != null) {
             synced.clear();
         }
-        mgr.scheduleJoinLodResync(target.getUUID());
+        ServerLodPayloadStore.getInstance().scheduleFullSync(target);
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;
