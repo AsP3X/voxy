@@ -78,8 +78,18 @@ public final class VoxyServerCommands {
                 // centerX and centerZ support ~ for the source's current position
                 .then(Commands.literal("start")
                         .then(Commands.argument("dimension", StringArgumentType.word())
-                                .suggests((ctx, sb) -> SharedSuggestionProvider.suggest(
-                                        new String[]{"overworld", "the_nether", "the_end"}, sb))
+                                .suggests((ctx, sb) -> {
+                                    java.util.List<String> dims = new java.util.ArrayList<>();
+                                    var server = ctx.getSource().getServer();
+                                    if (server != null) {
+                                        for (var level : server.getAllLevels())
+                                            dims.add(level.dimension().location().toString());
+                                    } else {
+                                        dims.addAll(java.util.List.of(
+                                                "minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
+                                    }
+                                    return SharedSuggestionProvider.suggest(dims, sb);
+                                })
                                 .then(Commands.argument("center", ColumnPosArgument.columnPos())
                                         .then(Commands.argument("radius", IntegerArgumentType.integer(1))
                                                 .executes(VoxyServerCommands::startRegion)))))
