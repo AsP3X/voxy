@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.PlayerSyncStateStore;
 import me.cortex.voxy.server.worldgen.ServerLodPayloadStore;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -214,11 +215,10 @@ public final class VoxyServerCommands {
                     "Voxy worldgen is not active on this server"));
             return 1;
         }
+        PlayerSyncStateStore.getInstance().resetWatermarks(target.getUUID(), target.getServer());
         var synced = PlayerTracker.getInstance().getSyncedChunks(target.getUUID());
-        if (synced != null) {
-            synced.clear();
-        }
-        ServerLodPayloadStore.getInstance().scheduleFullSync(target);
+        if (synced != null) synced.clear();
+        ServerLodPayloadStore.getInstance().scheduleDeltaSync(target);
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;

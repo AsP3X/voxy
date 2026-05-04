@@ -145,9 +145,9 @@ public final class ServerLodPayloadStore {
 
         var snapshot = new java.util.ArrayList<>(dimCache.values());
 
+        Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
         try {
             Files.createDirectories(path.getParent());
-            Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
             try (DataOutputStream out = new DataOutputStream(
                     new BufferedOutputStream(Files.newOutputStream(tmp)))) {
                 out.writeInt(MAGIC);
@@ -174,6 +174,7 @@ public final class ServerLodPayloadStore {
             Logger.info("Saved " + snapshot.size() + " LOD columns to " + path);
         } catch (Exception e) {
             Logger.error("Failed to save LOD payload store for " + dim, e);
+            try { Files.deleteIfExists(tmp); } catch (java.io.IOException ignored) {}
         }
     }
 

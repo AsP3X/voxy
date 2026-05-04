@@ -122,19 +122,24 @@ public final class PlayerSyncStateStore {
     static void writeFile(Path file, Map<String, Long> data) throws IOException {
         Files.createDirectories(file.getParent());
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-        try (DataOutputStream out = new DataOutputStream(
-                new BufferedOutputStream(Files.newOutputStream(tmp)))) {
-            out.writeInt(MAGIC);
-            out.writeInt(VERSION);
-            out.writeInt(data.size());
-            for (var entry : data.entrySet()) {
-                byte[] keyBytes = entry.getKey().getBytes(StandardCharsets.UTF_8);
-                out.writeShort(keyBytes.length);
-                out.write(keyBytes);
-                out.writeLong(entry.getValue());
+        try {
+            try (DataOutputStream out = new DataOutputStream(
+                    new BufferedOutputStream(Files.newOutputStream(tmp)))) {
+                out.writeInt(MAGIC);
+                out.writeInt(VERSION);
+                out.writeInt(data.size());
+                for (var entry : data.entrySet()) {
+                    byte[] keyBytes = entry.getKey().getBytes(StandardCharsets.UTF_8);
+                    out.writeShort(keyBytes.length);
+                    out.write(keyBytes);
+                    out.writeLong(entry.getValue());
+                }
             }
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
+            throw e;
         }
-        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static Path getPlayerFile(UUID playerId, MinecraftServer server) {
