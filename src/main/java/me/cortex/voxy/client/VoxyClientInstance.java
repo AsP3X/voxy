@@ -19,10 +19,15 @@ import me.cortex.voxy.commonImpl.VoxyInstance;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.world.level.storage.LevelResource;
 import java.nio.file.Path;
 
 public class VoxyClientInstance extends VoxyInstance {
+    // Set by MixinClientPacketListener before sessionStart() so resolveMultiplayerSaveSubdir()
+    // can access the listener at handleLogin HEAD, before mc.player is created.
+    public static ClientPacketListener pendingLoginListener;
+
     private final Config config;
     private final Path basePath;
     private final boolean noIngestOverride;
@@ -110,18 +115,14 @@ public class VoxyClientInstance extends VoxyInstance {
         return basePath.toAbsolutePath();
     }
 
-    /**
-     * Folder name under {@code .voxy/saves/} for the connected remote server.
-     * {@link Minecraft#gameMode} is still null while {@link me.cortex.voxy.client.mixin.minecraft.MixinClientPacketListener}
-     * runs at {@code handleLogin} HEAD, so we also consult {@link Minecraft#getConnection()}.
-     */
+    /** Folder name under {@code .voxy/saves/} for the connected remote server. */
     private static String resolveMultiplayerSaveSubdir() {
         Minecraft mc = Minecraft.getInstance();
         var fromMode = tryServerDataFromGameMode(mc);
         if (fromMode != null) {
             return fromMode;
         }
-        var listener = mc.getConnection();
+        var listener = pendingLoginListener != null ? pendingLoginListener : mc.getConnection();
         if (listener == null) {
             Logger.error("Client connection null — cannot resolve remote server for voxy storage");
             return "UNKNOWN";

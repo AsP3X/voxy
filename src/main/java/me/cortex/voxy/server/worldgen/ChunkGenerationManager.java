@@ -73,6 +73,7 @@ public final class ChunkGenerationManager {
     private final AtomicLong totalRemaining = new AtomicLong(0);
     private int syncTotalTickCounter = 0;
     private int serverProgressTickCounter = 0;
+    private int pregenLogTickCounter = 0;
 
     // mode
     private volatile PregenMode pregenMode = PregenMode.NONE;
@@ -694,6 +695,25 @@ public final class ChunkGenerationManager {
             }
         } else {
             serverProgressTickCounter = 0;
+        }
+
+        // Log pregen progress to server console at configured interval
+        int logInterval = VoxyWorldGenConfig.DATA.pregenLogIntervalTicks;
+        if (logInterval > 0 && isRunning() && pregenMode != PregenMode.NONE && !userPaused.get()) {
+            if (++pregenLogTickCounter >= logInterval) {
+                pregenLogTickCounter = 0;
+                long target = totalTarget.get();
+                long remaining = totalRemaining.get();
+                double pct = target > 0 ? ((target - remaining) * 100.0 / target) : 0.0;
+                double cps = stats.getChunksPerSecond();
+                String cpsStr = cps > 0 ? String.format(Locale.ROOT, "%.0f", cps) : "stalled";
+                String modeName = pregenMode == PregenMode.DYNAMIC ? "DYNAMIC" : "REGION";
+                Logger.info(String.format(Locale.ROOT,
+                        "[Pregen %s] %.1f%% complete (%d/%d left) — %s cps, %d tasks",
+                        modeName, pct, remaining, target, cpsStr, activeTaskCount.get()));
+            }
+        } else {
+            pregenLogTickCounter = 0;
         }
     }
 

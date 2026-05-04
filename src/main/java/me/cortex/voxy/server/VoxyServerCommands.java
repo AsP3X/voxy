@@ -82,11 +82,13 @@ public final class VoxyServerCommands {
                                     java.util.List<String> dims = new java.util.ArrayList<>();
                                     var server = ctx.getSource().getServer();
                                     if (server != null) {
-                                        for (var level : server.getAllLevels())
-                                            dims.add(level.dimension().location().toString());
+                                        for (var level : server.getAllLevels()) {
+                                            var loc = level.dimension().location();
+                                            dims.add("minecraft".equals(loc.getNamespace()) ? loc.getPath() : loc.toString());
+                                    }
                                     } else {
                                         dims.addAll(java.util.List.of(
-                                                "minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
+                                                "overworld", "the_nether", "the_end"));
                                     }
                                     return SharedSuggestionProvider.suggest(dims, sb);
                                 })
