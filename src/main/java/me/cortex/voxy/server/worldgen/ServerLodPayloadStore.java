@@ -33,11 +33,15 @@ public final class ServerLodPayloadStore {
     private static final ServerLodPayloadStore INSTANCE = new ServerLodPayloadStore();
     private static final int MAGIC = 0x564F5859; // "VOXY"
     private static final int VERSION = 2;
-    private static final int BATCH_SIZE = 128;
+    private static final int BATCH_SIZE = 32;
+    /** Minimum real-time milliseconds between LOD sync batches to prevent burst-flooding
+     *  Netty's outbound buffer during server tick catch-up (avoids keepalive timeout). */
+    private static final long BATCH_INTERVAL_MS = 50;
 
     record VersionedColumn(VoxyWorldGenNetworking.LodColumnPayload payload, long storeVersion) {}
 
     private final AtomicLong storeGeneration = new AtomicLong(0);
+    private final ConcurrentHashMap<UUID, Long> nextBatchTimeMs = new ConcurrentHashMap<>();
 
     private final Map<ResourceKey<Level>, Map<Long, VersionedColumn>> cache
             = new ConcurrentHashMap<>();
@@ -48,14 +52,36 @@ public final class ServerLodPayloadStore {
         return INSTANCE;
     }
 
-    /** Store a payload in memory. Overwrites any previous entry for the same chunk. */
+    /** Remove per-player rate-limit state when a player disconnects. */
+    public void clearPlayer(UUID playerId) {
+        nextBatchTimeMs.remove(playerId);
+    }
+
+    /** Store a payload in memory. Skips the update (and version bump) if the cached data is
+     *  byte-for-byte identical, preventing spurious delta-syncs caused by chunk re-loads. */
     public void storeColumn(ResourceKey<Level> dimension, ChunkPos pos, int minY,
                             List<VoxyWorldGenNetworking.LodSectionPayload> sections) {
         if (sections == null || sections.isEmpty()) return;
-        long version = storeGeneration.getAndIncrement();
         var dimCache = cache.computeIfAbsent(dimension, k -> new ConcurrentHashMap<>());
-        dimCache.put(pos.toLong(), new VersionedColumn(
+        long posKey = pos.toLong();
+        VersionedColumn existing = dimCache.get(posKey);
+        if (existing != null && sectionsEqual(existing.payload().sections(), sections)) return;
+        long version = storeGeneration.getAndIncrement();
+        dimCache.put(posKey, new VersionedColumn(
                 new VoxyWorldGenNetworking.LodColumnPayload(dimension, pos, minY, sections), version));
+    }
+
+    private static boolean sectionsEqual(List<VoxyWorldGenNetworking.LodSectionPayload> a,
+                                         List<VoxyWorldGenNetworking.LodSectionPayload> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            var sa = a.get(i);
+            var sb = b.get(i);
+            if (sa.y() != sb.y()) return false;
+            if (!java.util.Arrays.equals(sa.states(), sb.states())) return false;
+            if (!java.util.Arrays.equals(sa.biomes(), sb.biomes())) return false;
+        }
+        return true;
     }
 
     /** Check if the store has any data for a dimension. */
@@ -117,6 +143,19 @@ public final class ServerLodPayloadStore {
         if (player == null) return;
         if (!player.level().dimension().equals(dim)) return;
 
+        // Enforce minimum wall-clock interval between batches.
+        // During server tick catch-up, tick+1 tasks fire back-to-back with no real-time delay,
+        // which would burst all 76k+ columns into Netty's outbound buffer simultaneously and
+        // starve keepalive packets, causing a 30-second timeout disconnect.
+        long now = System.currentTimeMillis();
+        long nextSend = nextBatchTimeMs.getOrDefault(playerId, 0L);
+        if (now < nextSend) {
+            server.tell(new TickTask(server.getTickCount() + 1,
+                    () -> runDeltaSyncStep(server, playerId, dim, delta, offset, snapshotGeneration)));
+            return;
+        }
+        nextBatchTimeMs.put(playerId, now + BATCH_INTERVAL_MS);
+
         var synced = PlayerTracker.getInstance().getSyncedChunks(playerId);
         int end = Math.min(offset + BATCH_SIZE, delta.size());
         for (int i = offset; i < end; i++) {
@@ -132,6 +171,8 @@ public final class ServerLodPayloadStore {
                     () -> runDeltaSyncStep(server, playerId, dim, delta, end, snapshotGeneration)));
         } else {
             PlayerSyncStateStore.getInstance().setWatermark(playerId, dim, snapshotGeneration);
+            VoxyWorldGenNetworking.safeSendToPlayer(player,
+                    new VoxyWorldGenNetworking.SyncCompletePayload(delta.size()));
         }
     }
 

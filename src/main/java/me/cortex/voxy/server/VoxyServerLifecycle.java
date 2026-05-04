@@ -78,6 +78,7 @@ public final class VoxyServerLifecycle {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         ChunkGenerationManager.getInstance().clearJoinResyncState(player.getUUID());
         PlayerSyncStateStore.getInstance().savePlayer(player.getUUID(), player.getServer());
+        ServerLodPayloadStore.getInstance().clearPlayer(player.getUUID());
         PlayerTracker.getInstance().removePlayer(player);
     }
 

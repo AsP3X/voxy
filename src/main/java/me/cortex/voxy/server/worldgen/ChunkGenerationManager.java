@@ -526,8 +526,25 @@ public final class ChunkGenerationManager {
             }
         }
         state.loaded = true;
-        // Load persisted LOD payloads for this dimension
-        ServerLodPayloadStore.getInstance().load(level);
+        // Load LOD payloads on a background thread — avoid blocking the server tick thread.
+        // After loading completes, trigger a delta sync for any players already online in this dim.
+        final ServerLevel capturedLevel = level;
+        final ResourceKey<Level> capturedKey = key;
+        Thread lodLoadThread = new Thread(() -> {
+            ServerLodPayloadStore.getInstance().load(capturedLevel);
+            MinecraftServer srv = capturedLevel.getServer();
+            if (srv != null) {
+                srv.execute(() -> {
+                    for (ServerPlayer p : PlayerTracker.getInstance().getPlayers()) {
+                        if (p.level().dimension().equals(capturedKey)) {
+                            ServerLodPayloadStore.getInstance().scheduleDeltaSync(p);
+                        }
+                    }
+                });
+            }
+        }, "Voxy-LOD-Store-Load");
+        lodLoadThread.setDaemon(true);
+        lodLoadThread.start();
     }
 
     private void dispatchBatch(DimensionState finalState, List<ChunkPos> batch) throws InterruptedException {

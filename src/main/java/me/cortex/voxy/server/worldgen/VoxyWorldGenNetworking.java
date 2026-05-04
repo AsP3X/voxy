@@ -123,6 +123,21 @@ public final class VoxyWorldGenNetworking {
         public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    /**
+     * Sent from server → client when the delta sync (initial join or resync)
+     * has finished sending all batches. Carries the number of chunks synced
+     * so the client can show a completion message + toast.
+     */
+    public record SyncCompletePayload(int syncedChunks) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SyncCompletePayload> TYPE =
+                new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "sync_complete"));
+        public static final StreamCodec<FriendlyByteBuf, SyncCompletePayload> STREAM_CODEC =
+                StreamCodec.of((b, v) -> b.writeVarInt(v.syncedChunks()), b -> new SyncCompletePayload(b.readVarInt()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record ClientRequestResyncPayload() implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<ClientRequestResyncPayload> TYPE =
                 new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "client_request_resync"));

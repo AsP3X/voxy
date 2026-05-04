@@ -8,12 +8,16 @@ import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.server.worldgen.ServerPregenProgressPayload;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.toasts.Toast;
+import net.minecraft.client.gui.components.toasts.ToastComponent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
@@ -48,6 +52,16 @@ public final class VoxyWorldGenClientReceiver {
 
     public static void onSyncTotal(VoxyWorldGenNetworking.SyncTotalPayload payload) {
         NetworkState.setTotalToSync(payload.total());
+    }
+
+    public static void onSyncComplete(VoxyWorldGenNetworking.SyncCompletePayload payload) {
+        if (!NetworkState.isServerConnected()) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.sendSystemMessage(Component.literal(
+                    "Voxy LOD sync complete — " + payload.syncedChunks() + " chunks loaded"));
+        }
+        mc.getToasts().addToast(new SyncCompleteToast(payload.syncedChunks()));
     }
 
     public static void onPregenProgress(ServerPregenProgressPayload payload) {
@@ -116,6 +130,25 @@ public final class VoxyWorldGenClientReceiver {
                 statesRaw.release();
                 biomesRaw.release();
             }
+        }
+    }
+
+    private static final class SyncCompleteToast implements Toast {
+        private static final long DISPLAY_TIME = 5000L;
+        private final Component title;
+        private final Component message;
+
+        SyncCompleteToast(int chunkCount) {
+            this.title = Component.literal("Voxy Sync Complete");
+            this.message = Component.literal(chunkCount + " chunks loaded");
+        }
+
+        @Override
+        public Visibility render(GuiGraphics graphics, ToastComponent toastComponent, long timeSinceLastVisible) {
+            graphics.fill(0, 0, this.width(), this.height(), 0xF0161616);
+            graphics.drawString(toastComponent.getMinecraft().font, this.title, 8, 7, 0xFFFFFF, false);
+            graphics.drawString(toastComponent.getMinecraft().font, this.message, 8, 18, 0xAAAAAA, false);
+            return timeSinceLastVisible >= DISPLAY_TIME ? Visibility.HIDE : Visibility.SHOW;
         }
     }
 }
