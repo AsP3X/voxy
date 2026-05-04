@@ -111,6 +111,15 @@ dependencies {
     modLocal "net.caffeinemc:CaffeineConfig:1.3.0+1.17"
     // Lithium API (LithiumHashPalette) — same types when present on class path; optional at runtime on Neo
     compileOnly "maven.modrinth:lithium:${lithium_modrinth_version}"
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation(sourceSets.main.output)
+    testImplementation(files(sourceSets.main.compileClasspath))
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
 }
 
 // NeoForge / Minecraft — ModDev 2
