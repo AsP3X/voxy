@@ -7,6 +7,8 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.TickTask;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 
@@ -16,6 +18,7 @@ import io.netty.buffer.ByteBuf;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.io.DataInputStream;
@@ -79,15 +82,57 @@ public final class ServerLodPayloadStore {
         return Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
     }
 
-    /**
-     * Schedule a full sync of every stored LOD column for the player's current dimension.
-     */
+    /** Delegates to {@link #scheduleDeltaSync}. Callers with a zero watermark get a full sync. */
     public void scheduleFullSync(ServerPlayer player) {
-        scheduleDeltaSync(player); // replaced in Task 5
+        scheduleDeltaSync(player);
     }
 
     public void scheduleDeltaSync(ServerPlayer player) {
-        // TODO: implemented in Task 5
+        var server = player.getServer();
+        if (server == null) return;
+
+        UUID playerId = player.getUUID();
+        ResourceKey<Level> dim = player.level().dimension();
+        long watermark = PlayerSyncStateStore.getInstance().getWatermark(playerId, dim);
+        long snapshotGeneration = storeGeneration.get();
+
+        var dimCache = cache.get(dim);
+        if (dimCache == null || dimCache.isEmpty()) return;
+
+        List<VersionedColumn> delta = collectDelta(dimCache, watermark, player.chunkPosition());
+        if (delta.isEmpty()) {
+            PlayerSyncStateStore.getInstance().setWatermark(playerId, dim, snapshotGeneration);
+            return;
+        }
+
+        server.tell(new TickTask(server.getTickCount() + 1,
+                () -> runDeltaSyncStep(server, playerId, dim, delta, 0, snapshotGeneration)));
+    }
+
+    private void runDeltaSyncStep(MinecraftServer server,
+                                  UUID playerId, ResourceKey<Level> dim,
+                                  List<VersionedColumn> delta, int offset,
+                                  long snapshotGeneration) {
+        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+        if (player == null) return;
+        if (!player.level().dimension().equals(dim)) return;
+
+        var synced = PlayerTracker.getInstance().getSyncedChunks(playerId);
+        int end = Math.min(offset + BATCH_SIZE, delta.size());
+        for (int i = offset; i < end; i++) {
+            var vc = delta.get(i);
+            long posKey = vc.payload().pos().toLong();
+            if (synced != null && synced.contains(posKey)) continue;
+            VoxyWorldGenNetworking.safeSendToPlayer(player, vc.payload());
+            if (synced != null) synced.add(posKey);
+        }
+
+        if (end < delta.size()) {
+            server.tell(new TickTask(server.getTickCount() + 1,
+                    () -> runDeltaSyncStep(server, playerId, dim, delta, end, snapshotGeneration)));
+        } else {
+            PlayerSyncStateStore.getInstance().setWatermark(playerId, dim, snapshotGeneration);
+        }
     }
 
     public void save(ServerLevel level) {
