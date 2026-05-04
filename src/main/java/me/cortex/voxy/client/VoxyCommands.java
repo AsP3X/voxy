@@ -41,7 +41,7 @@ import java.util.concurrent.CompletableFuture;
 
 public class VoxyCommands {
 
-    public static LiteralArgumentBuilder<CommandSourceStack> register() {
+    public static LiteralArgumentBuilder<CommandSourceStack> register(boolean singleplayer) {
         var imports = Commands.literal("import")
                 .then(Commands.literal("world")
                         .then(Commands.argument("world_name", StringArgumentType.string())
@@ -155,13 +155,16 @@ public class VoxyCommands {
                                     return 0;
                                 })));
 
-        return Commands.literal("voxy")
+        var voxy = Commands.literal("voxy")
                 .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
                 .then(debug)
-                .then(overlay)
-                .then(buildPregen())
+                .then(overlay);
+        if (singleplayer) {
+            voxy = voxy.then(buildPregen());
+        }
+        return voxy
                 .then(Commands.literal("resync")
                         .executes(ctx -> {
                             if (!NetworkState.isServerConnected()) {
