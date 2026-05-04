@@ -11,16 +11,25 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 
 import io.netty.buffer.Unpooled;
+import io.netty.buffer.ByteBuf;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public final class ServerLodPayloadStore {
     private static final ServerLodPayloadStore INSTANCE = new ServerLodPayloadStore();
     private static final int MAGIC = 0x564F5859; // "VOXY"
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int BATCH_SIZE = 128;
 
     record VersionedColumn(VoxyWorldGenNetworking.LodColumnPayload payload, long storeVersion) {}
@@ -82,11 +91,96 @@ public final class ServerLodPayloadStore {
     }
 
     public void save(ServerLevel level) {
-        // TODO: updated in Task 3
+        ResourceKey<Level> dim = level.dimension();
+        var dimCache = cache.get(dim);
+        if (dimCache == null || dimCache.isEmpty()) return;
+
+        Path path = getStorePath(level);
+        if (path == null) return;
+
+        var snapshot = new java.util.ArrayList<>(dimCache.values());
+
+        try {
+            Files.createDirectories(path.getParent());
+            Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
+            try (DataOutputStream out = new DataOutputStream(
+                    new BufferedOutputStream(Files.newOutputStream(tmp)))) {
+                out.writeInt(MAGIC);
+                out.writeInt(VERSION);
+                out.writeInt(snapshot.size());
+                for (var vc : snapshot) {
+                    out.writeLong(vc.storeVersion());
+                    ByteBuf raw = Unpooled.buffer();
+                    RegistryFriendlyByteBuf buf = null;
+                    try {
+                        buf = new RegistryFriendlyByteBuf(
+                                new FriendlyByteBuf(raw), level.registryAccess());
+                        VoxyWorldGenNetworking.LodColumnPayload.STREAM_CODEC.encode(buf, vc.payload());
+                        byte[] bytes = new byte[buf.readableBytes()];
+                        buf.readBytes(bytes);
+                        out.writeInt(bytes.length);
+                        out.write(bytes);
+                    } finally {
+                        if (buf != null) buf.release(); else raw.release();
+                    }
+                }
+            }
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+            Logger.info("Saved " + snapshot.size() + " LOD columns to " + path);
+        } catch (Exception e) {
+            Logger.error("Failed to save LOD payload store for " + dim, e);
+        }
     }
 
     public void load(ServerLevel level) {
-        // TODO: updated in Task 3
+        ResourceKey<Level> dim = level.dimension();
+        Path path = getStorePath(level);
+        if (path == null || !Files.exists(path)) return;
+
+        try (DataInputStream in = new DataInputStream(
+                new BufferedInputStream(Files.newInputStream(path)))) {
+            int magic = in.readInt();
+            int version = in.readInt();
+            if (magic != MAGIC || version != VERSION) {
+                Logger.warn("LOD payload store file has wrong magic/version (expected VERSION="
+                        + VERSION + "), skipping: " + path);
+                return;
+            }
+            int count = in.readInt();
+            if (count < 0 || count > 50_000_000) {
+                Logger.warn("LOD payload store count out of bounds (" + count + "), skipping: " + path);
+                return;
+            }
+            Map<Long, VersionedColumn> dimCache = new HashMap<>();
+            for (int i = 0; i < count; i++) {
+                long colVersion = in.readLong();
+                int len = in.readInt();
+                if (len < 0 || len > 50_000_000) {
+                    Logger.warn("LOD payload entry length out of bounds (" + len + ") at index "
+                            + i + ", skipping remainder: " + path);
+                    return;
+                }
+                byte[] bytes = new byte[len];
+                in.readFully(bytes);
+                RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(
+                        new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes)),
+                        level.registryAccess());
+                try {
+                    var payload = VoxyWorldGenNetworking.LodColumnPayload.STREAM_CODEC.decode(buf);
+                    dimCache.put(payload.pos().toLong(), new VersionedColumn(payload, colVersion));
+                } finally {
+                    buf.release();
+                }
+            }
+            // Advance the global counter past every loaded version so new writes never reuse a stamp.
+            long maxVersion = dimCache.values().stream()
+                    .mapToLong(VersionedColumn::storeVersion).max().orElse(0L);
+            storeGeneration.accumulateAndGet(maxVersion + 1, Math::max);
+            cache.put(dim, new ConcurrentHashMap<>(dimCache));
+            Logger.info("Loaded " + dimCache.size() + " LOD columns from " + path);
+        } catch (Exception e) {
+            Logger.error("Failed to load LOD payload store for " + dim, e);
+        }
     }
 
     private static java.nio.file.Path getStorePath(ServerLevel level) {
