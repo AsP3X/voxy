@@ -298,6 +298,7 @@ public final class ChunkGenerationManager {
         userPaused.set(true);
         PregenMode prev = pregenMode;
         pregenMode = PregenMode.NONE;
+        milestonesReached = 0;
         // Discard in-flight batch tracking so a fresh start won't be confused
         for (DimensionState ds : dimensionStates.values()) {
             ds.trackedBatches.clear();
@@ -731,6 +732,9 @@ public final class ChunkGenerationManager {
         tpsMonitor.tick();
         stats.tick();
 
+        // Check for pregen progress milestones and trigger batched LOD sync
+        checkMilestones();
+
         if (pregenMode == PregenMode.DYNAMIC) {
             checkPlayerMovement();
         }
@@ -1071,6 +1075,61 @@ public final class ChunkGenerationManager {
         if (target <= 0) return 0;
         long done = target - remaining;
         return (int) ((done * 100L) / target);
+    }
+
+    /** Called from tick() to check if any new milestone has been reached. */
+    private void checkMilestones() {
+        if (pregenMode == PregenMode.NONE || userPaused.get()) return;
+        int pct = computeProgressPercent();
+        for (int milestone : new int[]{25, 50, 75, 100}) {
+            if (pct >= milestone && !isMilestoneReached(milestone)) {
+                setMilestoneReached(milestone);
+                triggerMilestoneSync(milestone);
+            }
+        }
+    }
+
+    /** Send a batched delta sync to all players in active pregen dimension(s). */
+    private void triggerMilestoneSync(int pct) {
+        var players = PlayerTracker.getInstance().getPlayers();
+        if (players.isEmpty()) return;
+
+        if (pregenMode == PregenMode.REGION) {
+            ServerLevel level = server != null ? server.getLevel(regionDimension) : null;
+            if (level == null) return;
+            int scheduled = 0;
+            for (ServerPlayer player : players) {
+                if (player.level().dimension().equals(regionDimension)) {
+                    ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
+                    scheduled++;
+                }
+            }
+            if (scheduled > 0) {
+                Logger.info(String.format(Locale.ROOT,
+                        "[Pregen REGION] %d%% milestone reached — scheduled LOD sync for %d player(s) in %s",
+                        pct, scheduled, regionDimension.location()));
+            }
+        } else if (pregenMode == PregenMode.DYNAMIC) {
+            // Find dimensions that still have remaining work
+            Set<ResourceKey<Level>> activeDims = new HashSet<>();
+            for (DimensionState ds : dimensionStates.values()) {
+                if (ds.remainingInRadius.get() > 0) {
+                    activeDims.add(ds.level.dimension());
+                }
+            }
+            int scheduled = 0;
+            for (ServerPlayer player : players) {
+                if (activeDims.contains(player.level().dimension())) {
+                    ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
+                    scheduled++;
+                }
+            }
+            if (scheduled > 0) {
+                Logger.info(String.format(Locale.ROOT,
+                        "[Pregen DYNAMIC] %d%% milestone reached — scheduled LOD sync for %d player(s)",
+                        pct, scheduled));
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
