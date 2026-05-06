@@ -1,6 +1,9 @@
 package me.cortex.voxy.server.worldgen;
 
 import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.common.world.WorldEngine;
+import me.cortex.voxy.commonImpl.VoxyCommon;
+import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.server.mixin.ServerChunkCacheInvoker;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -594,6 +597,18 @@ public final class ChunkGenerationManager {
                 activeTaskCount.incrementAndGet();
                 stats.incrementQueued();
 
+                // Hold a reference on the world engine so the idle cleaner does not shut it down
+                // while chunk generation is in progress. Re-creating the world later requires
+                // opening RocksDB on the server thread, which can block for 60+ seconds and crash
+                // the server via ServerHangWatchdog.
+                var voxyInstance = VoxyCommon.getInstance();
+                if (voxyInstance != null) {
+                    var worldId = WorldIdentifier.of(finalState.level);
+                    if (worldId != null) {
+                        voxyInstance.getOrCreate(worldId, true);
+                    }
+                }
+
                 if (finalState.tellusActive) {
                     TellusGenStub.enqueueGenerate(finalState.level, pos, () -> {
                         onSuccess(finalState, pos);
@@ -992,6 +1007,21 @@ public final class ChunkGenerationManager {
         if (state.trackedChunks.remove(pos.toLong())) {
             activeTaskCount.decrementAndGet();
             throttle.release();
+
+            var instance = VoxyCommon.getInstance();
+            if (instance != null) {
+                var worldId = WorldIdentifier.of(state.level);
+                if (worldId != null) {
+                    var engine = instance.getNullable(worldId);
+                    if (engine != null) {
+                        try {
+                            engine.releaseRef();
+                        } catch (IllegalStateException e) {
+                            // World was already freed; nothing to release
+                        }
+                    }
+                }
+            }
         }
     }
 
