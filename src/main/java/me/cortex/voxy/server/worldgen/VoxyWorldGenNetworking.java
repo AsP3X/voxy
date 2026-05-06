@@ -314,7 +314,9 @@ public final class VoxyWorldGenNetworking {
         PlayerSyncStateStore.getInstance().resetWatermarks(player.getUUID(), player.getServer());
         var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
         if (synced != null) synced.clear();
+        // Use scheduleDeltaSync only: it replays the persistent ServerLodPayloadStore.
+        // Do NOT call scheduleJoinLodResync here — that pulls from live in-memory
+        // chunks which may differ from the stored snapshot.
         ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
-        ChunkGenerationManager.getInstance().scheduleJoinLodResync(player.getUUID());
     }
 }

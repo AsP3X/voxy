@@ -230,8 +230,8 @@ public final class VoxyServerCommands {
         PlayerSyncStateStore.getInstance().resetWatermarks(target.getUUID(), target.getServer());
         var synced = PlayerTracker.getInstance().getSyncedChunks(target.getUUID());
         if (synced != null) synced.clear();
+        // Use the persistent payload store only, not live in-memory chunks.
         ServerLodPayloadStore.getInstance().scheduleDeltaSync(target);
-        mgr.scheduleJoinLodResync(target.getUUID());
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;
