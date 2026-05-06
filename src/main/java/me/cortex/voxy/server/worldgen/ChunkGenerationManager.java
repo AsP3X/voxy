@@ -74,6 +74,8 @@ public final class ChunkGenerationManager {
     private final AtomicLong totalTarget = new AtomicLong(0);
     /** Cached sum of all {@code remainingInRadius} — updated incrementally to avoid stream overhead on every HUD frame. */
     private final AtomicLong totalRemaining = new AtomicLong(0);
+    /** Bitmask of reached milestones: bit 0 = 25%, bit 1 = 50%, bit 2 = 75%, bit 3 = 100% */
+    private byte milestonesReached = 0;
     private int syncTotalTickCounter = 0;
     private int serverProgressTickCounter = 0;
     private int pregenLogTickCounter = 0;
@@ -228,6 +230,7 @@ public final class ChunkGenerationManager {
 
         pregenMode = PregenMode.DYNAMIC;
         userPaused.set(false);
+        milestonesReached = 0;
         scheduleConfigReload();
         Logger.info("Voxy pregen started in dynamic mode");
     }
@@ -276,6 +279,7 @@ public final class ChunkGenerationManager {
 
         pregenMode = PregenMode.REGION;
         userPaused.set(false);
+        milestonesReached = 0;
         scheduleConfigReload();
         // Logger joins varargs; do not use slf4j {@code {}}-style here.
         Logger.info(String.format(Locale.ROOT,
@@ -1023,6 +1027,32 @@ public final class ChunkGenerationManager {
                 }
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Milestone helpers
+
+    /** Check if a given percentage milestone has already been triggered. */
+    private boolean isMilestoneReached(int pct) {
+        int bit = pct / 25 - 1;
+        return bit >= 0 && bit < 4 && (milestonesReached & (1 << bit)) != 0;
+    }
+
+    /** Mark a percentage milestone as triggered. */
+    private void setMilestoneReached(int pct) {
+        int bit = pct / 25 - 1;
+        if (bit >= 0 && bit < 4) {
+            milestonesReached |= (byte) (1 << bit);
+        }
+    }
+
+    /** Compute current completion percentage (0-100). */
+    private int computeProgressPercent() {
+        long target = totalTarget.get();
+        long remaining = totalRemaining.get();
+        if (target <= 0) return 0;
+        long done = target - remaining;
+        return (int) ((done * 100L) / target);
     }
 
     // -------------------------------------------------------------------------
