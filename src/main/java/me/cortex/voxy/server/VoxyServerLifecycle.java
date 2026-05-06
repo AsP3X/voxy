@@ -63,9 +63,10 @@ public final class VoxyServerLifecycle {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         PlayerTracker.getInstance().addPlayer(player);
         VoxyWorldGenNetworking.sendHandshake(player);
-        // Load persisted watermarks immediately so scheduleDeltaSync can read them
-        // when the TickTask fires 20 ticks later.
-        PlayerSyncStateStore.getInstance().loadPlayer(player.getUUID(), player.getServer());
+        // Force a full sync on every login: the client’s LOD cache is in-memory only
+        // and is lost on disconnect, so any persisted watermark would cause us to skip
+        // columns the player never actually received.
+        PlayerSyncStateStore.getInstance().resetWatermarks(player.getUUID(), player.getServer());
         player.getServer().tell(new net.minecraft.server.TickTask(
                 player.getServer().getTickCount() + 20,
                 () -> {
@@ -77,7 +78,9 @@ public final class VoxyServerLifecycle {
     private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         ChunkGenerationManager.getInstance().clearJoinResyncState(player.getUUID());
-        PlayerSyncStateStore.getInstance().savePlayer(player.getUUID(), player.getServer());
+        // Do not save the watermark: the client’s LOD cache is discarded on disconnect,
+        // so persisting it would cause the next login to receive only delta updates
+        // and miss everything that was already in the store.
         ServerLodPayloadStore.getInstance().clearPlayer(player.getUUID());
         PlayerTracker.getInstance().removePlayer(player);
     }

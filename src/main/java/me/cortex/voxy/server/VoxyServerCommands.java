@@ -231,6 +231,7 @@ public final class VoxyServerCommands {
         var synced = PlayerTracker.getInstance().getSyncedChunks(target.getUUID());
         if (synced != null) synced.clear();
         ServerLodPayloadStore.getInstance().scheduleDeltaSync(target);
+        mgr.scheduleJoinLodResync(target.getUUID());
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;

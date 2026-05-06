@@ -18,6 +18,7 @@ import io.netty.buffer.ByteBuf;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -45,6 +46,8 @@ public final class ServerLodPayloadStore {
 
     private final Map<ResourceKey<Level>, Map<Long, VersionedColumn>> cache
             = new ConcurrentHashMap<>();
+    /** Guard so overlapping auto-saves for the same dimension do not race on temp files. */
+    private final Set<ResourceKey<Level>> saving = ConcurrentHashMap.newKeySet();
 
     private ServerLodPayloadStore() {}
 
@@ -127,7 +130,10 @@ public final class ServerLodPayloadStore {
 
         List<VersionedColumn> delta = collectDelta(dimCache, watermark, player.chunkPosition());
         if (delta.isEmpty()) {
-            PlayerSyncStateStore.getInstance().setWatermark(playerId, dim, snapshotGeneration);
+            // Do not advance the watermark when there is nothing to send.
+            // The cache may still be loading from disk on a background thread,
+            // and bumping the watermark now would permanently skip older entries
+            // that arrive after the load finishes.
             return;
         }
 
@@ -183,40 +189,47 @@ public final class ServerLodPayloadStore {
 
         Path path = getStorePath(level);
         if (path == null) return;
+        if (!saving.add(dim)) return; // another save for this dim is already running
 
+        // Snapshot references on the caller thread (fast), then serialize + write in background.
         var snapshot = new java.util.ArrayList<>(dimCache.values());
-
         Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
-        try {
-            Files.createDirectories(path.getParent());
-            try (DataOutputStream out = new DataOutputStream(
-                    new BufferedOutputStream(Files.newOutputStream(tmp)))) {
-                out.writeInt(MAGIC);
-                out.writeInt(VERSION);
-                out.writeInt(snapshot.size());
-                for (var vc : snapshot) {
-                    out.writeLong(vc.storeVersion());
-                    ByteBuf raw = Unpooled.buffer();
-                    RegistryFriendlyByteBuf buf = null;
-                    try {
-                        buf = new RegistryFriendlyByteBuf(
-                                new FriendlyByteBuf(raw), level.registryAccess());
-                        VoxyWorldGenNetworking.LodColumnPayload.STREAM_CODEC.encode(buf, vc.payload());
-                        byte[] bytes = new byte[buf.readableBytes()];
-                        buf.readBytes(bytes);
-                        out.writeInt(bytes.length);
-                        out.write(bytes);
-                    } finally {
-                        if (buf != null) buf.release(); else raw.release();
+        Thread t = new Thread(() -> {
+            try {
+                Files.createDirectories(path.getParent());
+                try (DataOutputStream out = new DataOutputStream(
+                        new BufferedOutputStream(Files.newOutputStream(tmp)))) {
+                    out.writeInt(MAGIC);
+                    out.writeInt(VERSION);
+                    out.writeInt(snapshot.size());
+                    for (var vc : snapshot) {
+                        out.writeLong(vc.storeVersion());
+                        ByteBuf raw = Unpooled.buffer();
+                        RegistryFriendlyByteBuf buf = null;
+                        try {
+                            buf = new RegistryFriendlyByteBuf(
+                                    new FriendlyByteBuf(raw), level.registryAccess());
+                            VoxyWorldGenNetworking.LodColumnPayload.STREAM_CODEC.encode(buf, vc.payload());
+                            byte[] bytes = new byte[buf.readableBytes()];
+                            buf.readBytes(bytes);
+                            out.writeInt(bytes.length);
+                            out.write(bytes);
+                        } finally {
+                            if (buf != null) buf.release(); else raw.release();
+                        }
                     }
                 }
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+                Logger.info("Saved " + snapshot.size() + " LOD columns to " + path);
+            } catch (Exception e) {
+                Logger.error("Failed to save LOD payload store for " + dim, e);
+                try { Files.deleteIfExists(tmp); } catch (java.io.IOException ignored) {}
+            } finally {
+                saving.remove(dim);
             }
-            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
-            Logger.info("Saved " + snapshot.size() + " LOD columns to " + path);
-        } catch (Exception e) {
-            Logger.error("Failed to save LOD payload store for " + dim, e);
-            try { Files.deleteIfExists(tmp); } catch (java.io.IOException ignored) {}
-        }
+        }, "Voxy-LOD-Store-Save");
+        t.setDaemon(true);
+        t.start();
     }
 
     public void load(ServerLevel level) {
@@ -263,10 +276,22 @@ public final class ServerLodPayloadStore {
             long maxVersion = dimCache.values().stream()
                     .mapToLong(VersionedColumn::storeVersion).max().orElse(0L);
             storeGeneration.accumulateAndGet(maxVersion + 1, Math::max);
-            cache.put(dim, new ConcurrentHashMap<>(dimCache));
+            // Merge into live cache: entries already present (added during startup while load ran)
+            // take precedence because they reflect the current world state.
+            var liveCache = cache.computeIfAbsent(dim, k -> new ConcurrentHashMap<>());
+            for (var entry : dimCache.entrySet()) {
+                liveCache.putIfAbsent(entry.getKey(), entry.getValue());
+            }
             Logger.info("Loaded " + dimCache.size() + " LOD columns from " + path);
         } catch (Exception e) {
             Logger.error("Failed to load LOD payload store for " + dim, e);
+        }
+    }
+
+    /** Save LOD payloads for every level that has cached data. */
+    public void saveAll(MinecraftServer server) {
+        for (var level : server.getAllLevels()) {
+            save(level);
         }
     }
 

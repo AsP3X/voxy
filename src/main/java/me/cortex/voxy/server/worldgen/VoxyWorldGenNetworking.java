@@ -315,5 +315,6 @@ public final class VoxyWorldGenNetworking {
         var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
         if (synced != null) synced.clear();
         ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
+        ChunkGenerationManager.getInstance().scheduleJoinLodResync(player.getUUID());
     }
 }

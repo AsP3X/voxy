@@ -74,6 +74,9 @@ public final class ChunkGenerationManager {
     private int syncTotalTickCounter = 0;
     private int serverProgressTickCounter = 0;
     private int pregenLogTickCounter = 0;
+    private int lodSaveTickCounter = 0;
+    /** Auto-save LOD payload store every N ticks while pregen is active. */
+    private static final int LOD_SAVE_INTERVAL_TICKS = 6000; // 5 minutes
 
     // mode
     private volatile PregenMode pregenMode = PregenMode.NONE;
@@ -278,9 +281,8 @@ public final class ChunkGenerationManager {
         if (missingInRegion == 0) {
             var p = regionLevel != null ? ChunkPersistence.getGenerationCachePath(regionLevel, dimension) : null;
             Logger.warn("Voxy region pregen has nothing to do: every column in that range is already recorded in the "
-                    + "voxy pregen cache. The worker will idle until you /voxy pregen stop, pick a new area, or delete "
-                    + "the cache file to reset progress"
-                    + (p != null ? (": " + p) : " (world/voxy_gen_*.bin)") + ".");
+                    + "voxy pregen cache. The task will auto-stop."
+                    + (p != null ? (" Cache: " + p) : " (world/voxy_gen_*.bin)") + ".");
         }
     }
 
@@ -348,7 +350,7 @@ public final class ChunkGenerationManager {
     private void workerLoop() {
         while (workerRunning.get() && running.get()) {
             try {
-                if (!VoxyWorldGenConfig.DATA.enabled || server == null) {
+                if (!VoxyWorldGenConfig.DATA.enabled || server == null || !server.isRunning()) {
                     Thread.sleep(100);
                     continue;
                 }
@@ -486,7 +488,7 @@ public final class ChunkGenerationManager {
     }
 
     private void workerLoopRegion() throws InterruptedException {
-        if (server == null) { Thread.sleep(100); return; }
+        if (server == null || !server.isRunning()) { Thread.sleep(100); return; }
 
         DistanceGraph rg = regionGraph;
         if (rg == null) { Thread.sleep(100); return; }
@@ -507,6 +509,10 @@ public final class ChunkGenerationManager {
                 regionMinCx, regionMinCz, regionMaxCx, regionMaxCz, ds.trackedBatches);
 
         if (batch == null) {
+            if (ds.remainingInRadius.get() == 0 && totalRemaining.get() == 0) {
+                Logger.info("Voxy region pregen completed — all columns finished.");
+                stop();
+            }
             Thread.sleep(10);
             return;
         }
@@ -608,48 +614,63 @@ public final class ChunkGenerationManager {
         }
 
         if (!readyToGenerate.isEmpty()) {
-            server.execute(() -> {
-                ServerChunkCache cache = finalState.level.getChunkSource();
-                List<ChunkPos> actuallyGenerate = new ArrayList<>(readyToGenerate.size());
-
+            if (server == null || !server.isRunning()) {
                 for (ChunkPos pos : readyToGenerate) {
-                    if (finalState.level.hasChunk(pos.x, pos.z)) {
-                        LevelChunk existingChunk = finalState.level.getChunk(pos.x, pos.z);
-                        if (existingChunk != null && chunkHasRenderableData(existingChunk)) {
-                            WorldGenVoxyHooks.ingestChunk(existingChunk);
-                            VoxyWorldGenNetworking.broadcastLODData(existingChunk);
-                        }
-                        onSuccess(finalState, pos);
-                        completeTask(finalState, pos);
-                    } else {
-                        queueTicketAdd(finalState.level, pos);
-                        actuallyGenerate.add(pos);
-                    }
+                    cleanupTask(finalState.level, pos);
                 }
+                return;
+            }
+            server.execute(() -> {
+                try {
+                    ServerChunkCache cache = finalState.level.getChunkSource();
+                    List<ChunkPos> actuallyGenerate = new ArrayList<>(readyToGenerate.size());
 
-                if (!actuallyGenerate.isEmpty()) {
-                    processPendingTickets();
-                    for (ChunkPos pos : actuallyGenerate) {
-                        ((ServerChunkCacheInvoker) cache)
-                                .invokeGetChunkFutureMainThread(pos.x, pos.z, ChunkStatus.FULL, true)
-                                .whenCompleteAsync((result, throwable) -> {
-                                    try {
-                                        if (throwable == null && result != null && result.isSuccess()
-                                                && result.orElse(null) instanceof LevelChunk chunk) {
-                                            onSuccess(finalState, pos);
-                                            if (chunkHasRenderableData(chunk)) {
-                                                WorldGenVoxyHooks.ingestChunk(chunk);
-                                                VoxyWorldGenNetworking.broadcastLODData(chunk);
+                    for (ChunkPos pos : readyToGenerate) {
+                        if (finalState.level.hasChunk(pos.x, pos.z)) {
+                            LevelChunk existingChunk = finalState.level.getChunk(pos.x, pos.z);
+                            if (existingChunk != null && chunkHasRenderableData(existingChunk)) {
+                                WorldGenVoxyHooks.ingestChunk(existingChunk);
+                                VoxyWorldGenNetworking.broadcastLODData(existingChunk);
+                            }
+                            onSuccess(finalState, pos);
+                            completeTask(finalState, pos);
+                        } else {
+                            queueTicketAdd(finalState.level, pos);
+                            actuallyGenerate.add(pos);
+                        }
+                    }
+
+                    if (!actuallyGenerate.isEmpty()) {
+                        processPendingTickets();
+                        for (ChunkPos pos : actuallyGenerate) {
+                            ((ServerChunkCacheInvoker) cache)
+                                    .invokeGetChunkFutureMainThread(pos.x, pos.z, ChunkStatus.FULL, true)
+                                    .whenCompleteAsync((result, throwable) -> {
+                                        try {
+                                            if (throwable == null && result != null && result.isSuccess()
+                                                    && result.orElse(null) instanceof LevelChunk chunk) {
+                                                onSuccess(finalState, pos);
+                                                if (chunkHasRenderableData(chunk)) {
+                                                    WorldGenVoxyHooks.ingestChunk(chunk);
+                                                    VoxyWorldGenNetworking.broadcastLODData(chunk);
+                                                }
+                                            } else {
+                                                onFailure(finalState, pos);
                                             }
-                                        } else {
-                                            onFailure(finalState, pos);
+                                            cleanupTask(finalState.level, pos);
+                                        } catch (Exception e) {
+                                            Logger.error("Exception in chunk generation callback for " + pos, e);
+                                            cleanupTask(finalState.level, pos);
                                         }
-                                        cleanupTask(finalState.level, pos);
-                                    } catch (Exception e) {
-                                        Logger.error("Exception in chunk generation callback for " + pos, e);
-                                        cleanupTask(finalState.level, pos);
-                                    }
-                                }, server);
+                                    }, server);
+                        }
+                    }
+                } catch (Exception e) {
+                    Logger.error("Exception in dispatch batch server task", e);
+                    for (ChunkPos pos : readyToGenerate) {
+                        try {
+                            cleanupTask(finalState.level, pos);
+                        } catch (Exception ignored) {}
                     }
                 }
             });
@@ -731,6 +752,18 @@ public final class ChunkGenerationManager {
             }
         } else {
             pregenLogTickCounter = 0;
+        }
+
+        // Auto-save LOD payload store periodically during active pregen
+        if (isRunning() && pregenMode != PregenMode.NONE && !userPaused.get()) {
+            if (++lodSaveTickCounter >= LOD_SAVE_INTERVAL_TICKS) {
+                lodSaveTickCounter = 0;
+                if (server != null && server.isRunning()) {
+                    ServerLodPayloadStore.getInstance().saveAll(server);
+                }
+            }
+        } else {
+            lodSaveTickCounter = 0;
         }
     }
 
@@ -885,16 +918,24 @@ public final class ChunkGenerationManager {
         TicketOp op;
         java.util.Set<ServerLevel> modifiedLevels = new java.util.HashSet<>();
         while ((op = pendingTicketOps.poll()) != null) {
-            ServerChunkCache cache = op.level().getChunkSource();
-            if (op.add()) {
-                cache.addRegionTicket(TicketType.FORCED, op.pos(), 0, op.pos());
-            } else {
-                cache.removeRegionTicket(TicketType.FORCED, op.pos(), 0, op.pos());
+            try {
+                ServerChunkCache cache = op.level().getChunkSource();
+                if (op.add()) {
+                    cache.addRegionTicket(TicketType.FORCED, op.pos(), 0, op.pos());
+                } else {
+                    cache.removeRegionTicket(TicketType.FORCED, op.pos(), 0, op.pos());
+                }
+                modifiedLevels.add(op.level());
+            } catch (Exception e) {
+                Logger.error("Exception processing ticket op for " + op.pos(), e);
             }
-            modifiedLevels.add(op.level());
         }
         for (ServerLevel level : modifiedLevels) {
-            ((ServerChunkCacheInvoker) level.getChunkSource()).invokeRunDistanceManagerUpdates();
+            try {
+                ((ServerChunkCacheInvoker) level.getChunkSource()).invokeRunDistanceManagerUpdates();
+            } catch (Exception e) {
+                Logger.error("Exception running distance manager updates for " + level.dimension(), e);
+            }
         }
     }
 
@@ -1084,6 +1125,10 @@ public final class ChunkGenerationManager {
             if (c == null) {
                 continue;
             }
+            // Delta sync may have already sent this chunk — skip duplicate.
+            if (synced != null && synced.contains(pos.toLong())) {
+                continue;
+            }
             var sections = VoxyWorldGenNetworking.buildSections(c);
             if (sections.isEmpty()) {
                 joinResyncCollectSkip
@@ -1093,6 +1138,7 @@ public final class ChunkGenerationManager {
             }
             VoxyWorldGenNetworking.sendLODDataPrebuilt(
                     player, level.dimension(), pos, c.getMinSection(), sections);
+            if (synced != null) synced.add(pos.toLong());
             sent++;
         }
 
