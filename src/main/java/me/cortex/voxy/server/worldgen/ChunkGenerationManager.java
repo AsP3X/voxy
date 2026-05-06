@@ -649,7 +649,16 @@ public final class ChunkGenerationManager {
                             LevelChunk existingChunk = finalState.level.getChunk(pos.x, pos.z);
                             if (existingChunk != null && chunkHasRenderableData(existingChunk)) {
                                 WorldGenVoxyHooks.ingestChunk(existingChunk);
-                                VoxyWorldGenNetworking.broadcastLODData(existingChunk);
+                                // Cache the column for milestone sync, but do not live-broadcast during pregen.
+                                var sections = VoxyWorldGenNetworking.buildSections(existingChunk);
+                                if (!sections.isEmpty()) {
+                                    ServerLodPayloadStore.getInstance().storeColumn(
+                                            existingChunk.getLevel().dimension(), existingChunk.getPos(),
+                                            existingChunk.getMinSection(), sections);
+                                    if (pregenMode == PregenMode.NONE) {
+                                        VoxyWorldGenNetworking.broadcastLODData(existingChunk);
+                                    }
+                                }
                             }
                             onSuccess(finalState, pos);
                             completeTask(finalState, pos);
@@ -671,7 +680,16 @@ public final class ChunkGenerationManager {
                                                 onSuccess(finalState, pos);
                                                 if (chunkHasRenderableData(chunk)) {
                                                     WorldGenVoxyHooks.ingestChunk(chunk);
-                                                    VoxyWorldGenNetworking.broadcastLODData(chunk);
+                                                    // Cache the column for milestone sync, but do not live-broadcast during pregen.
+                                                    var sections = VoxyWorldGenNetworking.buildSections(chunk);
+                                                    if (!sections.isEmpty()) {
+                                                        ServerLodPayloadStore.getInstance().storeColumn(
+                                                                chunk.getLevel().dimension(), chunk.getPos(),
+                                                                chunk.getMinSection(), sections);
+                                                        if (pregenMode == PregenMode.NONE) {
+                                                            VoxyWorldGenNetworking.broadcastLODData(chunk);
+                                                        }
+                                                    }
                                                 }
                                             } else {
                                                 onFailure(finalState, pos);
