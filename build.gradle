@@ -48,7 +48,10 @@ repositories {
     mavenCentral()
 }
 
-sourceSets { java21 { java.srcDirs = ['src/java21/java'] ; compileClasspath += sourceSets.main.output } }
+sourceSets {
+    java21 { java.srcDirs = ['src/java21/java'] ; compileClasspath += sourceSets.main.output }
+    sodiumLegacy { java.srcDirs = ['src/sodiumLegacy/java'] }
+}
 
 def targetJava = 21
 java.toolchain.languageVersion = JavaLanguageVersion.of(targetJava)
@@ -59,6 +62,14 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 configurations {
+    /** Full Modrinth Sodium NeoForge file (may be a bootstrap jar with nested mod JAR in 0.8+). */
+    sodiumBootstrap
+    sodiumBootstrap.setCanBeResolved(true)
+    sodiumBootstrap.setCanBeConsumed(false)
+    /** Sodium 0.6.x — compile legacy option GUI + mixin only (avoids duplicate classes vs 0.8 on main classpath). */
+    sodium06ForLegacyCompile
+    sodium06ForLegacyCompile.setCanBeResolved(true)
+    sodium06ForLegacyCompile.setCanBeConsumed(false)
     voxyEmbed
     voxyEmbed.setCanBeResolved(true)
     voxyEmbed.setCanBeConsumed(false)
@@ -102,8 +113,9 @@ dependencies {
     voxyEmbed "org.lwjgl:lwjgl-lmdb:${lwjglV}:natives-linux"
     voxyEmbed "org.lwjgl:lwjgl-zstd:${lwjglV}:natives-linux"
 
-    compileOnly "maven.modrinth:sodium:${sodium_modrinth_version}"
+    sodiumBootstrap "maven.modrinth:sodium:${sodium_modrinth_version}"
     modLocal "maven.modrinth:sodium:${sodium_modrinth_version}"
+    sodium06ForLegacyCompile "maven.modrinth:sodium:${sodium_legacy_modrinth_version}"
     compileOnly "maven.modrinth:iris:${iris_modrinth_version}"
     modLocal "maven.modrinth:iris:${iris_modrinth_version}"
     modLocal "io.github.douira:glsl-transformer:2.0.1"
@@ -116,6 +128,43 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation(sourceSets.main.output)
     testImplementation(files(sourceSets.main.compileClasspath))
+}
+
+def sodiumModClassesJar = layout.buildDirectory.file("generated/sodiumModForCompile/sodium-mod.jar")
+
+/** Sodium 0.8+ Modrinth NeoForge JAR is a bootstrap; compile against the nested *-mod.jar when present. */
+def unpackSodiumModJar = tasks.register("unpackSodiumModJar") {
+    def bootFile = configurations.sodiumBootstrap.singleFile
+    inputs.file(bootFile)
+    outputs.file(sodiumModClassesJar)
+
+    doLast {
+        def out = sodiumModClassesJar.get().asFile
+        out.parentFile.mkdirs()
+        def nested = zipTree(bootFile).matching { include "META-INF/jarjar/*sodium*mod.jar" }.files
+        if (!nested.isEmpty()) {
+            java.nio.file.Files.copy(nested.iterator().next().toPath(), out.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } else {
+            java.nio.file.Files.copy(bootFile.toPath(), out.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { dependsOn unpackSodiumModJar }
+
+dependencies {
+    compileOnly files(sodiumModClassesJar).builtBy(unpackSodiumModJar)
+}
+
+tasks.named('compileSodiumLegacyJava', JavaCompile).configure {
+    dependsOn compileJava, unpackSodiumModJar
+    options.encoding = 'UTF-8'
+    options.release = targetJava
+    options.deprecation = true
+    classpath = sourceSets.main.compileClasspath.filter { f -> f.name != 'sodium-mod.jar' } +
+            sourceSets.main.output +
+            files(configurations.sodium06ForLegacyCompile.singleFile)
+    options.annotationProcessorPath = configurations.annotationProcessor
 }
 
 tasks.named('test') {
@@ -216,9 +265,10 @@ if (!isInGHA) {
 }
 
 tasks.named("jar", Jar) {
-    dependsOn compileJava21, rocksdbFilteredJar
+    dependsOn compileJava21, compileSodiumLegacyJava, rocksdbFilteredJar
     if (!isInGHA) { dependsOn relocateSqliteJar }
     from(sourceSets.java21.output) { into "META-INF/versions/21" }
+    from(sourceSets.sodiumLegacy.output)
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     from { zipTree(rocksdbFilteredJar.get().archiveFile.get().asFile) }
     from {

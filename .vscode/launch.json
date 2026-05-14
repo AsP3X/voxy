@@ -1,0 +1,71 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Client",
+      "presentation": {
+        "group": "Mod Development - voxy",
+        "order": 0
+      },
+      "projectName": "voxy",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003dvoxy%%C:\\Users\\asp3x\\Documents\\Development\\voxy\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Data",
+      "presentation": {
+        "group": "Mod Development - voxy",
+        "order": 1
+      },
+      "projectName": "voxy",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\dataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\dataRunVmArgs.txt",
+        "-Dfml.modFolders\u003dvoxy%%C:\\Users\\asp3x\\Documents\\Development\\voxy\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Server",
+      "presentation": {
+        "group": "Mod Development - voxy",
+        "order": 2
+      },
+      "projectName": "voxy",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\Users\\asp3x\\Documents\\Development\\voxy\\build\\moddev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003dvoxy%%C:\\Users\\asp3x\\Documents\\Development\\voxy\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    }
+  ]
+}

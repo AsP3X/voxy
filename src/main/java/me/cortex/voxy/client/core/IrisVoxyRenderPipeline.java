@@ -15,6 +15,9 @@ import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL30;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 
@@ -257,12 +260,30 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         return builder.toString();
     }
 
+    private static final String IRIS_TRANSLUCENT_FALLBACK_PATH = "/assets/voxy/shaders/iris/lod_translucent_fallback.glsl";
+
+    private static String loadIrisTranslucentFallback() {
+        try (InputStream in = IrisVoxyRenderPipeline.class.getResourceAsStream(IRIS_TRANSLUCENT_FALLBACK_PATH)) {
+            if (in == null) {
+                throw new IllegalStateException("Missing resource " + IRIS_TRANSLUCENT_FALLBACK_PATH);
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     public String patchTranslucentShader(AbstractSectionRenderer<?, ?> renderer, String input) {
-        if (this.data.translucentFragPatch() == null) return null;
-
         var builder = this.buildGenericShaderHeader(renderer, input);
-        builder.append(this.data.translucentFragPatch());
+        if (this.data.translucentFragPatch() != null) {
+            builder.append(this.data.translucentFragPatch());
+        } else {
+            // Without a pack-provided voxy_translucent.glsl, the LOD translucent pass stayed on the
+            // non-patched path while opaque LOD used the pack's PBR patch — ice/water looked flat
+            // and mismatched specular/lighting at the render ring.
+            builder.append(loadIrisTranslucentFallback());
+        }
         return builder.toString();
     }
 

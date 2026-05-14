@@ -129,8 +129,8 @@ public class Serialization {
             if (clzName.contains("SodiumVoxyConfigHelper")) {
                 continue;
             }
-            if (clzName.contains("VoxyConfigScreenPages")) {
-                continue;//Dont want to modmenu incase it doesnt exist
+            if (clzName.contains("VoxySodiumConfigEntry")) {
+                continue;
             }
             if (clzName.endsWith("VoxyConfig")) {
                 continue;//Special case to prevent recursive loading pain

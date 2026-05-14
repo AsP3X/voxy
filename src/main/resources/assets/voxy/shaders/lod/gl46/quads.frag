@@ -115,7 +115,15 @@ vec4 computeColour(vec2 texturePos, vec4 colour) {
     if (doTint) {
         colour *= uint2vec4RGBA(interData.z).yzwx;
     }
-    return (colour * uint2vec4RGBA(interData.y)) + vec4(0,0,0,float(interData.w&0xFFu)/255);
+    vec4 lightMul = uint2vec4RGBA(interData.y);
+#ifdef TRANSLUCENT
+    // Match Sodium/vanilla: lightmap modulates RGB only; atlas alpha stays the texture's
+    // translucency (multiplying lightmap channels into .a skews ice/glass vs chunk meshes).
+    return vec4(colour.rgb * lightMul.rgb, colour.a)
+        + vec4(0,0,0,float(interData.w&0xFFu)/255);
+#else
+    return (colour * lightMul) + vec4(0,0,0,float(interData.w&0xFFu)/255);
+#endif
 }
 
 #endif
@@ -140,10 +148,16 @@ void main() {
 //This is deprecated, TODO: remove the non mip code path
     //if (useMipmaps())
     {
+#ifdef TRANSLUCENT
+        // Merged ice/water quads cover many pixels with slowly changing atlas UVs, so
+        // textureGrad picks very coarse mips and the surface reads pale/gray vs Sodium.
+        colour = textureLod(blockModelAtlas, texPos, 0.0);
+#else
         vec2 uvSmol = uv*(1.0/(vec2(3.0,2.0)*256.0));
         vec2 dx = dFdx(uvSmol);//vec2(lDx, dDx);
         vec2 dy = dFdy(uvSmol);//vec2(lDy, dDy);
         colour = textureGrad(blockModelAtlas, texPos, dx, dy);
+#endif
         colour = clearTintMaskFromColour(colour);
     }// else {
     //    colour = textureLod(blockModelAtlas, texPos, 0);
@@ -165,11 +179,15 @@ void main() {
         return;
     }
 
-    //Check the minimum bounding texture and ensure we are greater than it
+    // Chunk-bound depth: clip opaque LOD to "outside" loaded chunk hulls. For translucents
+    // (ice, water) the hull depth does not match the water/ice surface; this test carves a
+    // wrong screen-space boundary (often a diagonal on flat oceans) instead of chunk steps.
+#ifndef TRANSLUCENT
     if (gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {
         discard;
         return;
     }
+#endif
 
 
     //Also, small quad is really fking over the mipping level somehow
