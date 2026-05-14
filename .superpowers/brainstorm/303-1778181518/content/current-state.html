@@ -1,0 +1,32 @@
+<h2>Current State: WorldgenProgressOverlay</h2>
+<p class="subtitle">The client already has a small top-center HUD panel for server sync. Here's what it looks like now:</p>
+
+<div class="mockup">
+  <div class="mockup-header">Current renderNetwork() overlay</div>
+  <div class="mockup-body" style="background:#111; padding:20px; position:relative; height:120px;">
+    <!-- Simulated Minecraft viewport -->
+    <div style="position:absolute; top:12px; left:50%; transform:translateX(-50%); width:280px; height:37px; background:rgba(6,9,18,0.75); border-top:2px solid #00BBFF; border-left:1px solid #004466; border-right:1px solid #004466; border-bottom:1px solid #004466;">
+      <div style="padding:4px 6px; color:#CCEEFF; font-size:12px;">
+        Voxy LOD Sync <span style="float:right; color:#00FFCC;">47.3%</span>
+      </div>
+      <div style="margin:2px 4px; height:7px; background:#0A0A14;">
+        <div style="width:47.3%; height:100%; background:linear-gradient(to bottom, #0099FF, #004499);"></div>
+      </div>
+      <div style="text-align:center; color:#7A8899; font-size:11px; margin-top:2px;">
+        12,450 / 26,300 chunks · 34.2 c/s · 128.5 KB/s
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p>This is a <strong>small top-center HUD panel</strong> (280×37 px) that appears while the client receives LOD chunks from the server. It shows:</p>
+  <ul>
+    <li>Progress bar (determinate when total known, animated pulse when not)</li>
+    <li>Chunks received / total</li>
+    <li>Receive rate (chunks/sec) and bandwidth (KB/s)</li>
+  </ul>
+  <p>It is <strong>off by default</strong> — players must enable it via <code>/voxy overlay sync enabled</code>.</p>
+</div>
+
+<p class="subtitle">What would you like to add or change?</p>

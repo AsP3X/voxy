@@ -73,6 +73,11 @@ public final class VoxyServerLifecycle {
                     VoxyWorldGenNetworking.sendSyncTotal(player);
                     ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
                 }));
+        // Fallback: live chunks that were never persisted (e.g. server crashed before
+        // auto-save) can still be synced from the in-world chunk data.
+        player.getServer().tell(new net.minecraft.server.TickTask(
+                player.getServer().getTickCount() + 40,
+                () -> ChunkGenerationManager.getInstance().scheduleJoinLodResync(player.getUUID())));
     }
 
     private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {

@@ -1,0 +1,64 @@
+<h2>Position Mockup: Above XP Bar</h2>
+<p class="subtitle">A thin progress bar sitting just above the XP bar / hotbar area (bottom-center of screen)</p>
+
+<div class="mockup">
+  <div class="mockup-header">Bottom-center of Minecraft viewport</div>
+  <div class="mockup-body" style="background:#111; padding:40px 20px 20px; position:relative; height:180px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;">
+    <!-- Simulated viewport content -->
+    <div style="width:100%; height:100%; background:linear-gradient(to bottom, #1a1a2e, #16213e);"></div>
+
+    <!-- The new sync progress element -->
+    <div style="position:absolute; bottom:58px; left:50%; transform:translateX(-50%); width:180px; height:10px; background:rgba(0,0,0,0.6); border:1px solid #333; border-radius:2px; overflow:hidden;">
+      <div style="width:65%; height:100%; background:linear-gradient(to right, #00AAFF, #00FFCC);"></div>
+    </div>
+    <div style="position:absolute; bottom:48px; left:50%; transform:translateX(-50%); color:#aaa; font-size:9px; text-shadow:1px 1px 0 #000;">
+      Syncing LODs... 65%
+    </div>
+
+    <!-- Simulated XP bar (vanilla) -->
+    <div style="position:absolute; bottom:38px; left:50%; transform:translateX(-50%); width:180px; height:5px; background:#444; border:1px solid #222;">
+      <div style="width:72%; height:100%; background:#80ff20;"></div>
+    </div>
+
+    <!-- Simulated hotbar -->
+    <div style="position:absolute; bottom:8px; left:50%; transform:translateX(-50%); display:flex; gap:2px;">
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #fff;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+      <div style="width:36px; height:36px; background:rgba(0,0,0,0.5); border:2px solid #777;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p>This positions a thin bar just above the vanilla XP bar. The question is: <strong>how much info should it show?</strong></p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="minimal" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Minimal — bar only</h3>
+      <p>Thin progress bar, no text. Disappears when sync completes. Most unobtrusive.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="compact" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Compact — bar + percentage</h3>
+      <p>Small bar with "Syncing... 47%" text underneath. Still very small footprint.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="info" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Compact — bar + percentage + stats</h3>
+      <p>Bar, percentage, and tiny stats (chunks/sec, ETA). Slightly taller but informative.</p>
+    </div>
+  </div>
+</div>

@@ -118,6 +118,8 @@ public final class ChunkGenerationManager {
     // worker
     private Thread workerThread;
     private final AtomicBoolean workerRunning = new AtomicBoolean(false);
+    /** Throttles repeated memory-pressure log spam — one warning per 30 s. */
+    private long lastMemoryPressureLogMs = 0;
 
     // c2me compatibility - queue ticket operations to process at safe time
     private record TicketOp(ServerLevel level, ChunkPos pos, boolean add) {}
@@ -379,9 +381,19 @@ public final class ChunkGenerationManager {
                 }
 
                 if (isMemoryPressureHigh()) {
-                    Logger.warn("Voxy pregen pausing briefly due to high memory pressure. "
-                            + "Waiting for GC / chunk unload to catch up.");
-                    Thread.sleep(1000);
+                    long now = System.currentTimeMillis();
+                    if (now - lastMemoryPressureLogMs > 30000L) {
+                        lastMemoryPressureLogMs = now;
+                        int active = activeTaskCount.get();
+                        if (active > 0) {
+                            Logger.warn("Voxy pregen pausing briefly due to high memory pressure. "
+                                    + "Waiting for " + active + " active task(s) to finish and chunks to unload.");
+                        } else {
+                            Logger.warn("Voxy pregen pausing briefly due to high memory pressure. "
+                                    + "Waiting for chunk unload to catch up.");
+                        }
+                    }
+                    Thread.sleep(5000);
                     continue;
                 }
 
@@ -534,31 +546,25 @@ public final class ChunkGenerationManager {
             Logger.info("tellus world detected for " + key + ", enabling fast generation");
         }
         ChunkPersistence.load(level, key, state.completedChunks);
-        synchronized (state.completedChunks) {
-            for (long pos : state.completedChunks) {
-                state.distanceGraph.markChunkCompleted(ChunkPos.getX(pos), ChunkPos.getZ(pos));
-            }
-        }
+
+        // Load persisted LOD payloads synchronously so the cache is ready before any
+        // player sync runs. The file is small enough that this is fast; the slow
+        // part (distance graph seeding) stays on a background thread.
+        ServerLodPayloadStore.getInstance().load(level);
+
         state.loaded = true;
-        // Load LOD payloads on a background thread — avoid blocking the server tick thread.
-        // After loading completes, trigger a delta sync for any players already online in this dim.
-        final ServerLevel capturedLevel = level;
-        final ResourceKey<Level> capturedKey = key;
-        Thread lodLoadThread = new Thread(() -> {
-            ServerLodPayloadStore.getInstance().load(capturedLevel);
-            MinecraftServer srv = capturedLevel.getServer();
-            if (srv != null) {
-                srv.execute(() -> {
-                    for (ServerPlayer p : PlayerTracker.getInstance().getPlayers()) {
-                        if (p.level().dimension().equals(capturedKey)) {
-                            ServerLodPayloadStore.getInstance().scheduleDeltaSync(p);
-                        }
-                    }
-                });
+
+        // Seed distance graph on a background thread — avoid blocking the server tick thread.
+        final DimensionState capturedState = state;
+        Thread graphSeedThread = new Thread(() -> {
+            synchronized (capturedState.completedChunks) {
+                for (long pos : capturedState.completedChunks) {
+                    capturedState.distanceGraph.markChunkCompleted(ChunkPos.getX(pos), ChunkPos.getZ(pos));
+                }
             }
-        }, "Voxy-LOD-Store-Load");
-        lodLoadThread.setDaemon(true);
-        lodLoadThread.start();
+        }, "Voxy-Graph-Seed");
+        graphSeedThread.setDaemon(true);
+        graphSeedThread.start();
     }
 
     private void dispatchBatch(DimensionState finalState, List<ChunkPos> batch) throws InterruptedException {
@@ -795,13 +801,12 @@ public final class ChunkGenerationManager {
             pregenLogTickCounter = 0;
         }
 
-        // Auto-save LOD payload store periodically during active pregen
-        if (isRunning() && pregenMode != PregenMode.NONE && !userPaused.get()) {
+        // Auto-save LOD payload store periodically so natural chunk loads are not lost
+        // if the server crashes while pregen is stopped.
+        if (isRunning() && server != null && server.isRunning()) {
             if (++lodSaveTickCounter >= LOD_SAVE_INTERVAL_TICKS) {
                 lodSaveTickCounter = 0;
-                if (server != null && server.isRunning()) {
-                    ServerLodPayloadStore.getInstance().saveAll(server);
-                }
+                ServerLodPayloadStore.getInstance().saveAll(server);
             }
         } else {
             lodSaveTickCounter = 0;
@@ -914,8 +919,9 @@ public final class ChunkGenerationManager {
      * 1. The heap is nearly fully expanded (totalMemory >= 90% of maxMemory)
      * 2. The committed heap itself is critically low on free space (< 5% free)
      *
-     * When pressure is detected we hint a GC and recheck once, because the
-     * low reading is often just a temporarily fragmented heap before a collection.
+     * Note: we intentionally do NOT call System.gc() here. Forced full GCs cause
+     * long stop-the-world pauses and do not help with native/off-heap memory held
+     * by Minecraft's chunk cache, which is the actual source of most pressure.
      */
     private boolean isMemoryPressureHigh() {
         Runtime runtime = Runtime.getRuntime();
@@ -931,21 +937,7 @@ public final class ChunkGenerationManager {
 
         // Phase 2: heap is expanded; check if committed space is critically low.
         // < 5% free inside the committed heap means GC is struggling to find room.
-        if (freeMemory >= totalMemory / 20L) {
-            return false;
-        }
-
-        // Phase 3: pressure detected — nudge GC and recheck to avoid false
-        // positives from a heap that just hasn't collected yet.
-        System.gc();
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        totalMemory = runtime.totalMemory();
-        freeMemory = runtime.freeMemory();
-        return totalMemory >= maxMemory * 9L / 10L && freeMemory < totalMemory / 20L;
+        return freeMemory < totalMemory / 20L;
     }
 
     private void updateThrottleCapacity() {
