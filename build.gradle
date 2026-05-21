@@ -108,7 +108,14 @@ dependencies {
     modLocal "maven.modrinth:iris:${iris_modrinth_version}"
     modLocal "io.github.douira:glsl-transformer:2.0.1"
     modLocal "org.anarres:jcpp:1.4.14"
-    modLocal "net.caffeinemc:CaffeineConfig:1.3.0+1.17"
+    // CaffeineConfig's POM declares fabric-loader (Fabric Sodium); not used on NeoForge dev runs.
+    if (!isInGHA) {
+        dependencies {
+            localRuntime("net.caffeinemc:CaffeineConfig:1.3.0+1.17") {
+                exclude group: "net.fabricmc", module: "fabric-loader"
+            }
+        }
+    }
     // Lithium API (LithiumHashPalette) — same types when present on class path; optional at runtime on Neo
     compileOnly "maven.modrinth:lithium:${lithium_modrinth_version}"
 }
@@ -205,6 +212,10 @@ def relocateSqliteJar = tasks.register("relocateSqliteJar", com.github.jengelman
 if (!isInGHA) {
     tasks.named("relocateSqliteJar") { dependsOn project.configurations.named("sqliteToRelocate") }
 }
+
+// Shadow plugin registers a default shadowJar that fat-jars runtimeClasspath (NeoForge + dev mods).
+// Voxy embeds deps via the jar task and relocateSqliteJar instead; disable to avoid resolution/zip64 failures.
+tasks.named("shadowJar") { enabled = false }
 
 tasks.named("jar", Jar) {
     dependsOn compileJava21, rocksdbFilteredJar
