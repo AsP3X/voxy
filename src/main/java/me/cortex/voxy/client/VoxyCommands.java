@@ -212,8 +212,18 @@ public class VoxyCommands {
                                 })))
                 .then(Commands.literal("start")
                         .then(Commands.argument("dimension", StringArgumentType.word())
-                                .suggests((ctx, sb) -> SharedSuggestionProvider.suggest(
-                                        new String[]{"overworld", "the_nether", "the_end"}, sb))
+                                .suggests((ctx, sb) -> {
+                                    var ssp = Minecraft.getInstance().getSingleplayerServer();
+                                    java.util.List<String> dims = new java.util.ArrayList<>();
+                                    if (ssp != null) {
+                                        for (var level : ssp.getAllLevels())
+                                            dims.add(level.dimension().location().toString());
+                                    } else {
+                                        dims.addAll(java.util.List.of(
+                                                "minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
+                                    }
+                                    return SharedSuggestionProvider.suggest(dims, sb);
+                                })
                                 .then(Commands.argument("center", ColumnPosArgument.columnPos())
                                         .then(Commands.argument("radius", IntegerArgumentType.integer(1))
                                                 .executes(VoxyCommands::startRegion)))))

@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.PlayerSyncStateStore;
 import me.cortex.voxy.server.worldgen.PlayerTracker;
 
 public final class VoxyWorldGenNetworking {
@@ -117,6 +118,21 @@ public final class VoxyWorldGenNetworking {
                 new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "sync_total"));
         public static final StreamCodec<FriendlyByteBuf, SyncTotalPayload> STREAM_CODEC =
                 StreamCodec.of((b, v) -> b.writeLong(v.total()), b -> new SyncTotalPayload(b.readLong()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    /**
+     * Sent from server → client when the delta sync (initial join or resync)
+     * has finished sending all batches. Carries the number of chunks synced
+     * so the client can show a completion message + toast.
+     */
+    public record SyncCompletePayload(int syncedChunks) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SyncCompletePayload> TYPE =
+                new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(VoxyMod.MODID, "sync_complete"));
+        public static final StreamCodec<FriendlyByteBuf, SyncCompletePayload> STREAM_CODEC =
+                StreamCodec.of((b, v) -> b.writeVarInt(v.syncedChunks()), b -> new SyncCompletePayload(b.readVarInt()));
 
         @Override
         public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -292,13 +308,15 @@ public final class VoxyWorldGenNetworking {
 
     public static void handleClientResyncRequest(ServerPlayer player) {
         ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
-        if (!mgr.isRunning()) {
-            return;
-        }
+        if (!mgr.isRunning()) return;
+        // Reset watermarks so scheduleDeltaSync sends the full store (watermark=0).
+        // resetWatermarks also deletes the file so the reset survives a crash.
+        PlayerSyncStateStore.getInstance().resetWatermarks(player.getUUID(), player.getServer());
         var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
-        if (synced != null) {
-            synced.clear();
-        }
-        ServerLodPayloadStore.getInstance().scheduleFullSync(player);
+        if (synced != null) synced.clear();
+        // Use scheduleDeltaSync only: it replays the persistent ServerLodPayloadStore.
+        // Do NOT call scheduleJoinLodResync here — that pulls from live in-memory
+        // chunks which may differ from the stored snapshot.
+        ServerLodPayloadStore.getInstance().scheduleDeltaSync(player);
     }
 }

@@ -27,6 +27,10 @@ public final class VoxyWorldGenBootstrap {
                 ServerPregenProgressPayload.TYPE,
                 ServerPregenProgressPayload.STREAM_CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> VoxyWorldGenClientReceiver.onPregenProgress(payload)));
+        reg.playToClient(
+                VoxyWorldGenNetworking.SyncCompletePayload.TYPE,
+                VoxyWorldGenNetworking.SyncCompletePayload.STREAM_CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> VoxyWorldGenClientReceiver.onSyncComplete(payload)));
         reg.playToServer(
                 VoxyWorldGenNetworking.ClientRequestResyncPayload.TYPE,
                 VoxyWorldGenNetworking.ClientRequestResyncPayload.STREAM_CODEC,

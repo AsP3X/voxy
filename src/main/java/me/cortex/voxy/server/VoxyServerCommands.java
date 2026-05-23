@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.PlayerSyncStateStore;
 import me.cortex.voxy.server.worldgen.ServerLodPayloadStore;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -77,8 +78,20 @@ public final class VoxyServerCommands {
                 // centerX and centerZ support ~ for the source's current position
                 .then(Commands.literal("start")
                         .then(Commands.argument("dimension", StringArgumentType.word())
-                                .suggests((ctx, sb) -> SharedSuggestionProvider.suggest(
-                                        new String[]{"overworld", "the_nether", "the_end"}, sb))
+                                .suggests((ctx, sb) -> {
+                                    java.util.List<String> dims = new java.util.ArrayList<>();
+                                    var server = ctx.getSource().getServer();
+                                    if (server != null) {
+                                        for (var level : server.getAllLevels()) {
+                                            var loc = level.dimension().location();
+                                            dims.add("minecraft".equals(loc.getNamespace()) ? loc.getPath() : loc.toString());
+                                    }
+                                    } else {
+                                        dims.addAll(java.util.List.of(
+                                                "overworld", "the_nether", "the_end"));
+                                    }
+                                    return SharedSuggestionProvider.suggest(dims, sb);
+                                })
                                 .then(Commands.argument("center", ColumnPosArgument.columnPos())
                                         .then(Commands.argument("radius", IntegerArgumentType.integer(1))
                                                 .executes(VoxyServerCommands::startRegion)))))
@@ -214,11 +227,11 @@ public final class VoxyServerCommands {
                     "Voxy worldgen is not active on this server"));
             return 1;
         }
+        PlayerSyncStateStore.getInstance().resetWatermarks(target.getUUID(), target.getServer());
         var synced = PlayerTracker.getInstance().getSyncedChunks(target.getUUID());
-        if (synced != null) {
-            synced.clear();
-        }
-        ServerLodPayloadStore.getInstance().scheduleFullSync(target);
+        if (synced != null) synced.clear();
+        // Use the persistent payload store only, not live in-memory chunks.
+        ServerLodPayloadStore.getInstance().scheduleDeltaSync(target);
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Voxy LOD resync started for " + target.getName().getString()), true);
         return 0;

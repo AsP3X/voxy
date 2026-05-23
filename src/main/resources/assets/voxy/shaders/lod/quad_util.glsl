@@ -105,7 +105,12 @@ uvec3 makeRemainingAttributes(const in BlockModel model, const in Quad quad, uin
         addin = encodedData;
     }
 
-    tinting.rgb *= computeDirectionalFaceTint(isShaded, face);
+#ifndef TRANSLUCENT
+    float faceShade = computeDirectionalFaceTint(isShaded, face);
+    tinting.rgb *= faceShade;
+#endif
+    // Translucent: keep lightmap RGB from getLighting only. Per-face shade here is flat across
+    // merged quads and reads darker than Sodium vertex-interpolated lighting on ice/water.
 
     attributes.x = packVec4(tinting);
     attributes.y = conditionalTinting;

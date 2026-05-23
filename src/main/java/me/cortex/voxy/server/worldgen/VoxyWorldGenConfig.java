@@ -56,5 +56,7 @@ public final class VoxyWorldGenConfig {
         public int generationRadius = 128;
         public int maxQueueSize = 20000;
         public int maxActiveTasks = 20;
+        /** How often to log pregen progress on the server (in ticks, 20 ticks = 1 second). 0 = disabled. */
+        public int pregenLogIntervalTicks = 600;
     }
 }

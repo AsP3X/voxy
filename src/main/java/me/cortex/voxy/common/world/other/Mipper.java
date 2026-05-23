@@ -106,7 +106,80 @@ public class Mipper {
         if (bestFluidBlockId == -1 || opaqueScore > bestFluidScore) {
             return -1;
         }
-        return pickRepresentative(states, bestFluidBlockId, fluidLayer, mapper, true);
+        return pickFluidRepresentative(states, bestFluidBlockId, fluidLayer, mapper);
+    }
+
+    /**
+     * When merging 2×2×2 fluid cells for LOD, prefer the biome that appears most often among
+     * fluid samples at the visible layer, then apply the same light / pure-fluid scoring as
+     * pickRepresentative. Without this, a single corner cell's biome can win and
+     * water tint jumps at mip boundaries (visible as zig-zag lines near biome transitions).
+     */
+    private static int pickFluidRepresentative(long[] states, int blockId, int fluidLayer, Mapper mapper) {
+        int[] distinct = new int[8];
+        int[] counts = new int[8];
+        int n = 0;
+        for (int i = 0; i < states.length; i++) {
+            if (CUBE_INDEX_TO_Y[i] != fluidLayer) {
+                continue;
+            }
+            long state = states[i];
+            if (Mapper.isAir(state) || Mapper.getBlockId(state) != blockId || !hasFluid(state, mapper)) {
+                continue;
+            }
+            int biome = Mapper.getBiomeId(state);
+            int k;
+            for (k = 0; k < n; k++) {
+                if (distinct[k] == biome) {
+                    counts[k]++;
+                    break;
+                }
+            }
+            if (k == n) {
+                distinct[n] = biome;
+                counts[n] = 1;
+                n++;
+            }
+        }
+        if (n == 0) {
+            return pickRepresentative(states, blockId, fluidLayer, mapper, true);
+        }
+        int majorityBiome = distinct[0];
+        int majorityCount = counts[0];
+        for (int k = 1; k < n; k++) {
+            if (counts[k] > majorityCount) {
+                majorityCount = counts[k];
+                majorityBiome = distinct[k];
+            } else if (counts[k] == majorityCount && distinct[k] < majorityBiome) {
+                majorityBiome = distinct[k];
+            }
+        }
+
+        int bestIndex = -1;
+        int bestScore = Integer.MIN_VALUE;
+        for (int i = 0; i < states.length; i++) {
+            if (CUBE_INDEX_TO_Y[i] != fluidLayer) {
+                continue;
+            }
+            long state = states[i];
+            if (Mapper.isAir(state) || Mapper.getBlockId(state) != blockId || !hasFluid(state, mapper)) {
+                continue;
+            }
+            if (Mapper.getBiomeId(state) != majorityBiome) {
+                continue;
+            }
+            int score = 128;//same weight as preferred-Y match in pickRepresentative
+            score += isPureFluid(state, mapper) ? 32 : 0;
+            score += Mapper.getLightId(state);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+        if (bestIndex == -1) {
+            return pickRepresentative(states, blockId, fluidLayer, mapper, true);
+        }
+        return bestIndex;
     }
 
     private static int chooseDominantState(long[] states, Mapper mapper) {
@@ -157,14 +230,20 @@ public class Mipper {
         if (dominantState != -1) {
             return states[dominantState];
         } else {
-            int blockLight = (Mapper.getLightId(I000) & 0xF0) + (Mapper.getLightId(I001) & 0xF0) + (Mapper.getLightId(I010) & 0xF0) + (Mapper.getLightId(I011) & 0xF0) +
-                    (Mapper.getLightId(I100) & 0xF0) + (Mapper.getLightId(I101) & 0xF0) + (Mapper.getLightId(I110) & 0xF0) + (Mapper.getLightId(I111) & 0xF0);
-            int skyLight = (Mapper.getLightId(I000) & 0x0F) + (Mapper.getLightId(I001) & 0x0F) + (Mapper.getLightId(I010) & 0x0F) + (Mapper.getLightId(I011) & 0x0F) +
-                    (Mapper.getLightId(I100) & 0x0F) + (Mapper.getLightId(I101) & 0x0F) + (Mapper.getLightId(I110) & 0x0F) + (Mapper.getLightId(I111) & 0x0F);
-            blockLight = blockLight / 8;
-            skyLight = (int) Math.ceil((double) skyLight / 8);
+            // Light byte is (block<<4)|sky (see DHImporter / Mapper). Old code summed (id&0xF0) then
+            // divided by 8, yielding values up to 240; (blockLight<<4) truncated to a byte wiped block
+            // light and made merged LOD cells far too dark vs chunk meshes.
+            int sumBlock = 0;
+            int sumSky = 0;
+            for (long state : states) {
+                int lm = Mapper.getLightId(state);
+                sumBlock += (lm >>> 4) & 0xF;
+                sumSky += lm & 0xF;
+            }
+            int avgBlock = Math.min(15, (sumBlock + 4) / 8);
+            int avgSky = Math.min(15, (sumSky + 7) / 8); // ceil(sumSky/8), same bias as before
 
-            return withLight(I111, (blockLight << 4) | skyLight);
+            return withLight(I111, (avgBlock << 4) | avgSky);
         }
     }
 }

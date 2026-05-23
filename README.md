@@ -56,6 +56,29 @@ gradlew.bat runServer
 
 `runClient` / `runServer` download game assets and launch Minecraft; the first run can take a while. For debugging outside Gradle, `gradlew createLaunchScripts` generates launcher scripts (see the task output for paths).
 
+## Server deployment
+
+On **Java 22+**, the JVM restricts native library access by default. If you see warnings like:
+
+```
+WARNING: java.lang.System::loadLibrary has been called by org.rocksdb.RocksDB in module voxy
+WARNING: java.lang.System::loadLibrary has been called by net.jpountz.util.Native in module org.lz4.java
+```
+
+Add this JVM flag to your server startup script to allow the required native libraries to load:
+
+```
+--enable-native-access=voxy,org.lz4.java
+```
+
+Full example (Neoforge server):
+
+```bash
+java -Xmx4G --enable-native-access=voxy,org.lz4.java @libraries/net/neoforged/neoforge/21.1.228/unix_args.txt nogui
+```
+
+Without this flag, RocksDB and LZ4 will still work for now but may be blocked by a future JVM release.
+
 ## IDE
 
 Import the folder as a Gradle project (IntelliJ IDEA, Eclipse, or VS Code with a Java/Gradle extension). The NeoForge plugin provides `neoForgeIdeSync` to generate files needed for IDE sync; your IDE’s Gradle import usually runs the equivalent steps automatically.

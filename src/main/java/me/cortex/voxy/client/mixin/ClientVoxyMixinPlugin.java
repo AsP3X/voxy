@@ -17,6 +17,8 @@ import java.util.Set;
 
 public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
     private static boolean sodiumLegacy = true;
+    /** Sodium 0.6 {@code SodiumOptionsGUI} without Caffeine 0.8 {@code VideoSettingsScreen}. */
+    private static boolean sodiumLegacyOptionsGui;
     private boolean valkyrienSkiesInstalled;
     private boolean nvidiumInstalled;
     private boolean sodiumInstalled;
@@ -64,10 +66,23 @@ public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
         } catch (Exception e) {
             Logger.error(e);
         }
+
+        // Do not use Class.forName on Sodium GUI classes here — that loads the class while mixins are
+        // still preparing and breaks Iris (MixinTargetAlreadyLoadedException on SodiumOptionsGUI).
+        ClassLoader cl = ClientVoxyMixinPlugin.class.getClassLoader();
+        sodiumLegacyOptionsGui = false;
+        if (sodiumInstalled) {
+            boolean hasModern = cl.getResource("net/caffeinemc/mods/sodium/client/gui/VideoSettingsScreen.class") != null;
+            boolean hasLegacy = cl.getResource("net/caffeinemc/mods/sodium/client/gui/SodiumOptionsGUI.class") != null;
+            sodiumLegacyOptionsGui = !hasModern && hasLegacy;
+        }
     }
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains("sodium.legacy.MixinSodiumOptionsGUI")) {
+            return sodiumInstalled && sodiumLegacyOptionsGui;
+        }
         if (mixinClassName.contains(".sodium.") && !sodiumInstalled) {
             return false;
         }
@@ -87,6 +102,10 @@ public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
             mixins.add(sodiumLegacy ? "sodium.MixinSodiumWorldRendererVSLegacy" : "sodium.MixinSodiumWorldRendererVS");
         } else {
             mixins.add("sodium.MixinDefaultChunkRenderer");
+        }
+
+        if (sodiumLegacyOptionsGui) {
+            mixins.add("sodium.legacy.MixinSodiumOptionsGUI");
         }
 
         return mixins;

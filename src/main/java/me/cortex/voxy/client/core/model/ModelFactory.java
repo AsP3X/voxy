@@ -529,8 +529,10 @@ public class ModelFactory {
 
             metadata |= canBeOccluded?4:0;
 
-            //Face uses its own lighting if its not flat against the adjacent block & isnt traslucent
-            metadata |= (offset > 0.01 || layer == RenderType.translucent())?0b1000:0;
+            // Neighbor brightness (vanilla/Sodium): translucent faces sample light from the adjacent
+            // cell along the face normal — critical for flat ice/water/glass under open sky.
+            // Self-lighting is only for inset non-translucent geometry (offset away from the block grid).
+            metadata |= (offset > 0.01 && layer != RenderType.translucent())?0b1000:0;
 
 
 
