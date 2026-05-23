@@ -102,7 +102,7 @@ public final class ServerLodPayloadStore {
     static List<VersionedColumn> collectDelta(Map<Long, VersionedColumn> dimCache,
                                                long watermark, ChunkPos playerChunk) {
         return dimCache.values().stream()
-                .filter(vc -> vc.storeVersion() >= watermark)
+                .filter(vc -> watermark == 0 || vc.storeVersion() > watermark)
                 .sorted(java.util.Comparator.comparingInt(vc -> chebyshev(vc.payload().pos(), playerChunk)))
                 .toList();
     }
