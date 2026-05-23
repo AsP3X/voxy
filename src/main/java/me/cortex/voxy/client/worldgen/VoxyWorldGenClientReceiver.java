@@ -5,6 +5,7 @@ import io.netty.buffer.Unpooled;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.world.service.VoxelIngestService;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
+import me.cortex.voxy.server.worldgen.ServerPregenProgressPayload;
 import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -47,6 +48,17 @@ public final class VoxyWorldGenClientReceiver {
 
     public static void onSyncTotal(VoxyWorldGenNetworking.SyncTotalPayload payload) {
         NetworkState.setTotalToSync(payload.total());
+    }
+
+    public static void onPregenProgress(ServerPregenProgressPayload payload) {
+        ServerProgressState.update(
+                payload.totalTarget(),
+                payload.totalRemaining(),
+                payload.chunksPerSecond(),
+                payload.activeTaskCount(),
+                payload.pregenMode(),
+                payload.paused()
+        );
     }
 
     @SuppressWarnings("unchecked")

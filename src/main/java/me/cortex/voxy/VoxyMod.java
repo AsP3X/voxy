@@ -43,7 +43,8 @@ public final class VoxyMod {
                                             deltaTracker.getGameTimeDeltaPartialTick(true))));
             // RegisterClientCommandsEvent is a NeoForge game-bus event, not IModBusEvent
             NeoForge.EVENT_BUS.addListener((RegisterClientCommandsEvent evt) ->
-                    evt.getDispatcher().register(VoxyCommands.register()));
+                    evt.getDispatcher().register(
+                            VoxyCommands.register(net.minecraft.client.Minecraft.getInstance().getSingleplayerServer() != null)));
             NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, VoxyKeyBindings::onClientTick);
         }
     }

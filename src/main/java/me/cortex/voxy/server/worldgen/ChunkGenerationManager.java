@@ -72,6 +72,7 @@ public final class ChunkGenerationManager {
     /** Cached sum of all {@code remainingInRadius} — updated incrementally to avoid stream overhead on every HUD frame. */
     private final AtomicLong totalRemaining = new AtomicLong(0);
     private int syncTotalTickCounter = 0;
+    private int serverProgressTickCounter = 0;
 
     // mode
     private volatile PregenMode pregenMode = PregenMode.NONE;
@@ -524,6 +525,8 @@ public final class ChunkGenerationManager {
             }
         }
         state.loaded = true;
+        // Load persisted LOD payloads for this dimension
+        ServerLodPayloadStore.getInstance().load(level);
     }
 
     private void dispatchBatch(DimensionState finalState, List<ChunkPos> batch) throws InterruptedException {
@@ -671,6 +674,26 @@ public final class ChunkGenerationManager {
             for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
                 VoxyWorldGenNetworking.sendSyncTotal(player);
             }
+        }
+
+        // Broadcast server pregen progress to all players every 20 ticks (1 s)
+        if (isRunning() && pregenMode != PregenMode.NONE) {
+            if (++serverProgressTickCounter >= 20) {
+                serverProgressTickCounter = 0;
+                ServerPregenProgressPayload payload = new ServerPregenProgressPayload(
+                        totalTarget.get(),
+                        totalRemaining.get(),
+                        stats.getChunksPerSecond(),
+                        activeTaskCount.get(),
+                        (byte) pregenMode.ordinal(),
+                        userPaused.get()
+                );
+                for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
+                    VoxyWorldGenNetworking.safeSendToPlayer(player, payload);
+                }
+            }
+        } else {
+            serverProgressTickCounter = 0;
         }
     }
 

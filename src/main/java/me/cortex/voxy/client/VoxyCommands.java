@@ -8,13 +8,15 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import me.cortex.voxy.client.worldgen.NetworkState;
 import me.cortex.voxy.client.worldgen.WorldgenProgressOverlay;
 import me.cortex.voxy.common.DebugUtils;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
-import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
 import me.cortex.voxy.commonImpl.importers.DHImporter;
 import me.cortex.voxy.commonImpl.importers.WorldImporter;
+import me.cortex.voxy.server.worldgen.ChunkGenerationManager;
+import me.cortex.voxy.server.worldgen.VoxyWorldGenNetworking;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -28,6 +30,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,7 +41,7 @@ import java.util.concurrent.CompletableFuture;
 
 public class VoxyCommands {
 
-    public static LiteralArgumentBuilder<CommandSourceStack> register() {
+    public static LiteralArgumentBuilder<CommandSourceStack> register(boolean singleplayer) {
         var imports = Commands.literal("import")
                 .then(Commands.literal("world")
                         .then(Commands.argument("world_name", StringArgumentType.string())
@@ -105,6 +108,21 @@ public class VoxyCommands {
                                             ctx.getSource().sendSuccess(() -> Component.literal(
                                                     "Voxy memory pressure indicator disabled"), false);
                                             return 0;
+                                        })))
+                        .then(Commands.literal("server_progress")
+                                .then(Commands.literal("enabled")
+                                        .executes(ctx -> {
+                                            WorldgenProgressOverlay.setServerProgressVisible(true);
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "Voxy server progress overlay enabled"), false);
+                                            return 0;
+                                        }))
+                                .then(Commands.literal("disabled")
+                                        .executes(ctx -> {
+                                            WorldgenProgressOverlay.setServerProgressVisible(false);
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "Voxy server progress overlay disabled"), false);
+                                            return 0;
                                         }))))
                 .then(Commands.literal("server_sync")
                         .then(Commands.literal("enabled")
@@ -137,13 +155,29 @@ public class VoxyCommands {
                                     return 0;
                                 })));
 
-        return Commands.literal("voxy")
+        var voxy = Commands.literal("voxy")
                 .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
                 .then(debug)
-                .then(overlay)
-                .then(buildPregen());
+                .then(overlay);
+        if (singleplayer) {
+            voxy = voxy.then(buildPregen());
+        }
+        return voxy
+                .then(Commands.literal("resync")
+                        .executes(ctx -> {
+                            if (!NetworkState.isServerConnected()) {
+                                ctx.getSource().sendFailure(Component.literal(
+                                        "Not connected to a Voxy-aware server"));
+                                return 1;
+                            }
+                            PacketDistributor.sendToServer(
+                                    new VoxyWorldGenNetworking.ClientRequestResyncPayload());
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Voxy LOD resync requested"), false);
+                            return 0;
+                        }));
     }
 
     // ---------------------------------------------------------------------------
@@ -160,7 +194,7 @@ public class VoxyCommands {
                                     if (mgr == null) return 1;
                                     mgr.startDynamic();
                                     ctx.getSource().sendSuccess(() -> Component.literal(
-                                            "Voxy pre-generation started (dynamic \u2014 follows players)"), false);
+                                            "Voxy pre-generation started (dynamic — follows players)"), false);
                                     return 0;
                                 }))
                         .then(Commands.literal("disable")
@@ -219,7 +253,7 @@ public class VoxyCommands {
                             if (mgr == null) return 1;
                             if (mgr.getPregenMode() == ChunkGenerationManager.PregenMode.NONE) {
                                 ctx.getSource().sendFailure(Component.literal(
-                                        "No task set \u2014 use /voxy pregen dynamic enable or /voxy pregen start"));
+                                        "No task set — use /voxy pregen dynamic enable or /voxy pregen start"));
                                 return 1;
                             }
                             if (!mgr.isUserPaused()) {

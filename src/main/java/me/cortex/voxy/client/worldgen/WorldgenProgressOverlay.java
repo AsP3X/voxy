@@ -29,6 +29,8 @@ public final class WorldgenProgressOverlay {
     private static boolean syncVisible = false;
     /** Memory-pressure dot inside the progress overlay; enabled by default. */
     private static boolean memoryPressureVisible = true;
+    /** Server pregen progress panel; disabled by default, enable via /voxy overlay progress server_progress enabled. */
+    private static boolean serverProgressVisible = false;
 
     public static boolean isProgressVisible() { return progressVisible; }
     public static void setProgressVisible(boolean v) { progressVisible = v; }
@@ -38,6 +40,9 @@ public final class WorldgenProgressOverlay {
 
     public static boolean isMemoryPressureVisible() { return memoryPressureVisible; }
     public static void setMemoryPressureVisible(boolean v) { memoryPressureVisible = v; }
+
+    public static boolean isServerProgressVisible() { return serverProgressVisible; }
+    public static void setServerProgressVisible(boolean v) { serverProgressVisible = v; }
 
     // State tracking across frames
     private static boolean wasRunning = false;
@@ -61,24 +66,29 @@ public final class WorldgenProgressOverlay {
         ChunkGenerationManager mgr = ChunkGenerationManager.getInstance();
         boolean localRunning = mgr.isRunning();
         ChunkGenerationManager.PregenMode mode = mgr.getPregenMode();
-        boolean taskActive = localRunning && mode != ChunkGenerationManager.PregenMode.NONE;
+        boolean localActive = localRunning && mode != ChunkGenerationManager.PregenMode.NONE;
+        boolean serverActive = ServerProgressState.isActive();
         boolean networkActive = NetworkState.isServerConnected();
 
-        // Reset peaks when a new run begins
-        if (taskActive && !wasRunning) {
+        // Reset peaks when a new local run begins
+        if (localActive && !wasRunning) {
             peakRemaining = 0;
         }
         // Reset network peak when disconnecting from a server
         if (!networkActive) {
             networkPeakReceived = 0;
         }
-        wasRunning = taskActive;
+        wasRunning = localActive;
 
-        if (!taskActive && !networkActive) return; // nothing running — hide immediately
+        if (!localActive && !serverActive && !networkActive) return; // nothing running
 
-        if (taskActive) {
+        if (localActive) {
             if (progressVisible) {
                 renderLocal(gfx, mc.font, mgr, mode, partialTick);
+            }
+        } else if (serverActive) {
+            if (progressVisible && serverProgressVisible) {
+                renderServerProgress(gfx, mc.font, partialTick);
             }
         } else {
             if (syncVisible) {
@@ -176,6 +186,50 @@ public final class WorldgenProgressOverlay {
             drawAnimatedBar(gfx, panX, panY, partialTick);
         }
         drawStats(gfx, font, panX, panY, statsStr);
+    }
+
+    // -------------------------------------------------------------------------
+    // Remote server pregen mode
+
+    private static void renderServerProgress(GuiGraphics gfx, Font font, float partialTick) {
+        long remaining = ServerProgressState.getTotalRemaining();
+        long total     = ServerProgressState.getTotalTarget();
+        boolean paused = ServerProgressState.isPaused();
+        double cps     = paused ? 0 : ServerProgressState.getChunksPerSecond();
+        int tasks      = paused ? 0 : ServerProgressState.getActiveTaskCount();
+
+        if (remaining <= 0 && !paused) return;
+
+        long completed = Math.max(0, total - remaining);
+        double progress = total > 0 ? 1.0 - ((double) remaining / total) : 0.0;
+
+        boolean isRegion = ServerProgressState.getMode() == ChunkGenerationManager.PregenMode.REGION;
+
+        String titleStr;
+        if (paused) {
+            titleStr = isRegion ? "Voxy Server Region Pre-gen \u23f8 Paused" : "Voxy Server Pre-generation \u23f8 Paused";
+        } else {
+            titleStr = isRegion ? "Voxy Server Region Pre-generation" : "Voxy Server Pre-generation";
+        }
+        String pctStr   = String.format(Locale.ROOT, "%.1f%%", progress * 100.0);
+        String statsStr = paused
+                ? String.format(Locale.ROOT, "%,d / %,d chunks  \u00b7  paused  \u00b7  /voxy pregen resume",
+                        completed, total)
+                : String.format(Locale.ROOT, "%,d / %,d chunks  \u00b7  %.1f c/s  \u00b7  %d tasks",
+                        completed, total, cps, tasks);
+
+        int titleColor = paused ? 0xFFFFCC66 : (isRegion ? 0xFFCCFFCC : 0xFFCCEEFF);
+        int pctColor   = paused ? 0xFFFF9900 : (isRegion ? 0xFF00FF88 : 0xFF00FFCC);
+
+        int sw   = gfx.guiWidth();
+        int panX = sw / 2 - PANEL_W / 2;
+        int panY = 12;
+
+        drawBackground(gfx, panX, panY, paused, isRegion);
+        drawTitleRow(gfx, font, panX, panY, titleStr, pctStr, titleColor, pctColor);
+        drawBar(gfx, panX, panY, progress, paused, isRegion, partialTick);
+        drawStats(gfx, font, panX, panY, statsStr);
+        drawMemoryPressureDot(gfx, panX, panY);
     }
 
     // -------------------------------------------------------------------------

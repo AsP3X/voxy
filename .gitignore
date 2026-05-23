@@ -15,3 +15,6 @@ bin/
 .vscode/.worktrees/
 .worktrees/
 .claude/
+
+# NeoForge compile-time generated package root
+net/
